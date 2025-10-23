@@ -1,0 +1,34 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.onur'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(findProperty('javaVersion') ?: '17')
+    }
+}
+
+repositories { mavenCentral() }
+
+dependencies {
+    // CLI parsing (picocli). Remove if you prefer raw args.
+    implementation 'info.picocli:picocli:4.7.6'
+    annotationProcessor 'info.picocli:picocli-codegen:4.7.6'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+application {
+    mainClass = 'com.onur.planetgen.cli.Main'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// Convenience run with args
+// usage: gradle run --args="--seed 123 --resolution 4096x2048 --preset earthlike --export albedo,height,normal,roughness,clouds"
