@@ -1,77 +1,24 @@
 package com.onur.planetgen.gui
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.VerticalScrollbar
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Divider
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -82,36 +29,18 @@ import com.onur.planetgen.erosion.ThermalErosion
 import com.onur.planetgen.planet.CoordinateCache
 import com.onur.planetgen.planet.ParallelHeightFieldGenerator
 import com.onur.planetgen.planet.SphericalSampler
-import com.onur.planetgen.render.AlbedoRenderer
-import com.onur.planetgen.render.AmbientOcclusionRenderer
-import com.onur.planetgen.render.CloudRenderer
-import com.onur.planetgen.render.EmissiveRenderer
-import com.onur.planetgen.render.NormalMapRenderer
-import com.onur.planetgen.render.RoughnessRenderer
+import com.onur.planetgen.render.*
 import com.onur.planetgen.util.ImageUtil
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.*
 import java.awt.Desktop
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.Duration
 import java.time.Instant
-import java.util.Comparator
-import java.util.Locale
+import java.util.*
 import kotlin.io.path.absolutePathString
-import kotlin.math.asin
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.floor
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "Planet Generator Studio") {
@@ -160,6 +89,7 @@ private fun PlanetGeneratorApp() {
     val logListState = rememberLazyListState()
     val fileListState = rememberLazyListState()
     var previewTab by remember { mutableStateOf(PreviewTab.STILL) }
+    var settingsTab by remember { mutableStateOf(SettingsTab.GENERAL) }
 
     LaunchedEffect(logLines.size) {
         if (logLines.isNotEmpty()) {
@@ -302,78 +232,105 @@ private fun PlanetGeneratorApp() {
                     }
                 }
 
-                Divider()
-                Text("Advanced Controls", style = MaterialTheme.typography.titleMedium)
-                ParameterSlider(
-                    label = "Sea level",
-                    value = seaLevel,
-                    onValueChange = { seaLevel = it },
-                    valueRange = -0.2f..0.3f,
-                    valueFormatter = { "%.2f".format(it) },
-                    enabled = generationState !is GenerationState.Running
-                )
-                ParameterSlider(
-                    label = "Mountain intensity",
-                    value = mountainIntensity,
-                    onValueChange = { mountainIntensity = it },
-                    valueRange = 0.5f..2.0f,
-                    valueFormatter = { "%.2f".format(it) },
-                    enabled = generationState !is GenerationState.Running
-                )
-                ParameterSlider(
-                    label = "Rainfall",
-                    value = rainfall,
-                    onValueChange = { rainfall = it },
-                    valueRange = 0f..1f,
-                    valueFormatter = { "%.2f".format(it) },
-                    enabled = generationState !is GenerationState.Running
-                )
-                ParameterSlider(
-                    label = "Evaporation",
-                    value = evaporation,
-                    onValueChange = { evaporation = it },
-                    valueRange = 0f..0.5f,
-                    valueFormatter = { "%.2f".format(it) },
-                    enabled = generationState !is GenerationState.Running
-                )
-                ParameterSlider(
-                    label = "Thermal iterations",
-                    value = thermalIterations,
-                    onValueChange = { thermalIterations = it.roundToInt().coerceIn(0, 40).toFloat() },
-                    valueRange = 0f..40f,
-                    valueFormatter = { it.roundToInt().toString() },
-                    enabled = generationState !is GenerationState.Running,
-                    steps = 39
-                )
-                ParameterSlider(
-                    label = "Hydraulic iterations",
-                    value = hydraulicIterations,
-                    onValueChange = { hydraulicIterations = it.roundToInt().coerceIn(0, 80).toFloat() },
-                    valueRange = 0f..80f,
-                    valueFormatter = { it.roundToInt().toString() },
-                    enabled = generationState !is GenerationState.Running,
-                    steps = 79
-                )
-                ParameterSlider(
-                    label = "Cloud coverage",
-                    value = cloudCoverage,
-                    onValueChange = { cloudCoverage = it },
-                    valueRange = 0f..1f,
-                    valueFormatter = { "%.2f".format(it) },
-                    enabled = generationState !is GenerationState.Running
-                )
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Checkbox(
-                        checked = applyHydraulic,
-                        onCheckedChange = { applyHydraulic = it },
-                        enabled = generationState !is GenerationState.Running
-                    )
-                    Text("Enable hydraulic erosion")
+                Spacer(Modifier.height(12.dp))
+                TabRow(selectedTabIndex = settingsTab.ordinal) {
+                    SettingsTab.entries.forEachIndexed { index, tab ->
+                        Tab(
+                            selected = settingsTab.ordinal == index,
+                            onClick = { settingsTab = SettingsTab.entries[index] },
+                            text = { Text(tab.label) }
+                        )
+                    }
                 }
+                when (settingsTab) {
+                    SettingsTab.GENERAL -> {
+                        Text(
+                            text = "Switch to Advanced to fine-tune erosion, climate, and cloud behaviour.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    }
+
+                    SettingsTab.ADVANCED -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ParameterSlider(
+                                label = "Sea level",
+                                value = seaLevel,
+                                onValueChange = { seaLevel = it },
+                                valueRange = -0.2f..0.3f,
+                                valueFormatter = { "%.2f".format(it) },
+                                enabled = generationState !is GenerationState.Running
+                            )
+                            ParameterSlider(
+                                label = "Mountain intensity",
+                                value = mountainIntensity,
+                                onValueChange = { mountainIntensity = it },
+                                valueRange = 0.5f..2.0f,
+                                valueFormatter = { "%.2f".format(it) },
+                                enabled = generationState !is GenerationState.Running
+                            )
+                            ParameterSlider(
+                                label = "Rainfall",
+                                value = rainfall,
+                                onValueChange = { rainfall = it },
+                                valueRange = 0f..1f,
+                                valueFormatter = { "%.2f".format(it) },
+                                enabled = generationState !is GenerationState.Running
+                            )
+                            ParameterSlider(
+                                label = "Evaporation",
+                                value = evaporation,
+                                onValueChange = { evaporation = it },
+                                valueRange = 0f..0.5f,
+                                valueFormatter = { "%.2f".format(it) },
+                                enabled = generationState !is GenerationState.Running
+                            )
+                            ParameterSlider(
+                                label = "Thermal iterations",
+                                value = thermalIterations,
+                                onValueChange = { thermalIterations = it.roundToInt().coerceIn(0, 40).toFloat() },
+                                valueRange = 0f..40f,
+                                valueFormatter = { it.roundToInt().toString() },
+                                enabled = generationState !is GenerationState.Running,
+                                steps = 39
+                            )
+                            ParameterSlider(
+                                label = "Hydraulic iterations",
+                                value = hydraulicIterations,
+                                onValueChange = { hydraulicIterations = it.roundToInt().coerceIn(0, 80).toFloat() },
+                                valueRange = 0f..80f,
+                                valueFormatter = { it.roundToInt().toString() },
+                                enabled = generationState !is GenerationState.Running,
+                                steps = 79
+                            )
+                            ParameterSlider(
+                                label = "Cloud coverage",
+                                value = cloudCoverage,
+                                onValueChange = { cloudCoverage = it },
+                                valueRange = 0f..1f,
+                                valueFormatter = { "%.2f".format(it) },
+                                enabled = generationState !is GenerationState.Running
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Checkbox(
+                                    checked = applyHydraulic,
+                                    onCheckedChange = { applyHydraulic = it },
+                                    enabled = generationState !is GenerationState.Running
+                                )
+                                Text("Enable hydraulic erosion")
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -480,14 +437,17 @@ private fun PlanetGeneratorApp() {
                         text = "Last run exported: ${state.summary.exportedMaps.joinToString()}",
                         style = MaterialTheme.typography.bodySmall
                     )
+
                     is GenerationState.Failed -> Text(
                         text = "Warning: ${state.throwable.message ?: "Unknown error"}",
                         style = MaterialTheme.typography.bodySmall
                     )
+
                     is GenerationState.Cancelled -> Text(
                         text = "Generation cancelled.",
                         style = MaterialTheme.typography.bodySmall
                     )
+
                     GenerationState.Idle -> {}
                 }
             }
@@ -531,22 +491,34 @@ private fun ParameterSlider(
     enabled: Boolean = true,
     steps: Int = 0
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(label, style = MaterialTheme.typography.bodySmall)
-            Text(valueFormatter(value), style = MaterialTheme.typography.bodySmall)
-        }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 32.dp)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.widthIn(max = 160.dp),
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1
+        )
         Slider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
             enabled = enabled,
             steps = steps,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = valueFormatter(value),
+            modifier = Modifier.widthIn(min = 48.dp),
+            style = MaterialTheme.typography.labelSmall,
+            textAlign = TextAlign.End,
+            maxLines = 1
         )
     }
 }
@@ -761,6 +733,11 @@ private fun refreshGeneratedFiles(
 }
 
 private data class PresetOption(val key: String, val label: String)
+
+private enum class SettingsTab(val label: String) {
+    GENERAL("General"),
+    ADVANCED("Advanced")
+}
 
 enum class ExportMap(val label: String, val defaultSelected: Boolean) {
     ALBEDO("Albedo", true),
