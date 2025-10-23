@@ -1,155 +1,208 @@
 package com.onur.planetgen.erosion;
 
+import java.util.Arrays;
 import java.util.PriorityQueue;
 
 /**
  * Represents water flow field on a height map.
- * Computes downslope flow direction and accumulation.
+ * Computes downslope routing, slope magnitude, and flow accumulation.
  */
 public final class FlowField {
-    public final float[][] flowX;   // X component of flow direction
-    public final float[][] flowY;   // Y component of flow direction
-    public final float[][] accum;   // Flow accumulation (how much water)
+    public final float[][] flowX;   // X component of normalized flow direction
+    public final float[][] flowY;   // Y component of normalized flow direction
+    public final float[][] accum;   // Flow accumulation (how much water passes through)
+    public final float[][] slope;   // Local slope magnitude toward steepest descent
+    public final int[][] targetY;   // Y coordinate of the downstream cell (-1 for sinks)
+    public final int[][] targetX;   // X coordinate of the downstream cell (-1 for sinks)
 
-    public FlowField(float[][] flowX, float[][] flowY, float[][] accum) {
+    FlowField(float[][] flowX,
+              float[][] flowY,
+              float[][] accum,
+              float[][] slope,
+              int[][] targetY,
+              int[][] targetX) {
         this.flowX = flowX;
         this.flowY = flowY;
         this.accum = accum;
+        this.slope = slope;
+        this.targetY = targetY;
+        this.targetX = targetX;
     }
 
     /**
-     * Compute flow field from height map using downslope steepest-descent routing.
-     * Flow accumulation represents how much water flows through each cell.
-     *
-     * @param h height field (normalized [-1, 1])
-     * @return flow field with routing information
+     * Compute flow field using a temporary workspace that is reused across calls.
      */
-    public static FlowField compute(float[][] h) {
+    public static FlowField compute(float[][] h, Workspace workspace) {
         int H = h.length;
         int W = h[0].length;
 
-        float[][] flowX = new float[H][W];
-        float[][] flowY = new float[H][W];
-        float[][] accum = new float[H][W];
+        workspace.ensureCapacity(H, W);
 
-        // Initialize accumulation with 1 (each cell contributes itself)
+        float[][] flowX = workspace.flowX;
+        float[][] flowY = workspace.flowY;
+        float[][] accum = workspace.accum;
+        float[][] slope = workspace.slope;
+        int[][] targetY = workspace.targetY;
+        int[][] targetX = workspace.targetX;
+        boolean[] visited = workspace.visited;
+
+        // Reset working arrays
         for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                accum[y][x] = 1.0f;
-            }
+            Arrays.fill(flowX[y], 0f);
+            Arrays.fill(flowY[y], 0f);
+            Arrays.fill(accum[y], 1f); // Each cell contributes at least its own runoff
+            Arrays.fill(slope[y], 0f);
         }
+        Arrays.fill(visited, 0, H * W, false);
 
-        // For each cell, find steepest downslope direction
+        // Determine steepest descent direction per cell
         for (int y = 0; y < H; y++) {
             for (int x = 0; x < W; x++) {
-                float centerHeight = h[y][x];
-                float maxSlope = 0;
-                float bestFlowX = 0;
-                float bestFlowY = 0;
+                float center = h[y][x];
 
-                // Check 8 neighbors (Moore neighborhood)
+                float maxSlope = 0f;
+                int bestY = -1;
+                int bestX = x;
+                float bestFx = 0f;
+                float bestFy = 0f;
+
                 for (int dy = -1; dy <= 1; dy++) {
                     for (int dx = -1; dx <= 1; dx++) {
                         if (dx == 0 && dy == 0) continue;
 
                         int ny = y + dy;
+                        if (ny < 0 || ny >= H) continue; // clamp at poles
+
                         int nx = x + dx;
+                        int wrappedX = (nx + W) % W;
 
-                        // Clamp y (poles), wrap x (seams)
-                        if (ny < 0 || ny >= H) continue;
-                        nx = (nx + W) % W;
+                        float neighbor = h[ny][wrappedX];
+                        float diff = center - neighbor;
+                        if (diff <= 0f) continue; // only consider downslope
 
-                        float neighborHeight = h[ny][nx];
-                        float heightDiff = centerHeight - neighborHeight;
+                        float distance = (dx == 0 || dy == 0) ? 1f : 1.41421356f;
+                        float slopeValue = diff / distance;
 
-                        // Only consider downslope neighbors
-                        if (heightDiff <= 0) continue;
-
-                        // Compute slope
-                        float distance = (float) Math.sqrt(dx * dx + dy * dy);
-                        float slope = heightDiff / distance;
-
-                        if (slope > maxSlope) {
-                            maxSlope = slope;
-                            bestFlowX = dx / distance;
-                            bestFlowY = dy / distance;
+                        if (slopeValue > maxSlope) {
+                            maxSlope = slopeValue;
+                            bestY = ny;
+                            bestX = wrappedX;
+                            bestFx = dx / distance;
+                            bestFy = dy / distance;
                         }
                     }
                 }
 
-                flowX[y][x] = bestFlowX;
-                flowY[y][x] = bestFlowY;
+                targetY[y][x] = bestY;
+                targetX[y][x] = bestY >= 0 ? bestX : -1;
+                flowX[y][x] = bestY >= 0 ? bestFx : 0f;
+                flowY[y][x] = bestY >= 0 ? bestFy : 0f;
+                slope[y][x] = maxSlope;
             }
         }
 
-        // Compute accumulation by propagating downslope (OPTIMIZED - O(n log n) instead of O(n²))
-        // Use priority queue to process cells from highest to lowest elevation
-        boolean[] visited = new boolean[H * W];
+        // Accumulate flow by processing cells from highest to lowest elevation
+        PriorityQueue<Cell> queue = workspace.queue;
+        queue.clear();
 
-        // Create max heap based on elevation
-        PriorityQueue<Cell> pq = new PriorityQueue<>((a, b) -> Float.compare(b.height, a.height));
-
-        // Add all cells to priority queue
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                pq.offer(new Cell(y, x, h[y][x]));
-            }
+        Cell[] cells = workspace.cells;
+        int total = H * W;
+        for (int index = 0; index < total; index++) {
+            Cell cell = cells[index];
+            cell.height = h[cell.y][cell.x];
+            queue.offer(cell);
         }
 
-        // Process cells from highest to lowest
-        while (!pq.isEmpty()) {
-            Cell cell = pq.poll();
+        while (!queue.isEmpty()) {
+            Cell cell = queue.poll();
             int cy = cell.y;
             int cx = cell.x;
 
-            if (visited[cy * W + cx]) continue;
-            visited[cy * W + cx] = true;
+            int flatIndex = cy * W + cx;
+            if (visited[flatIndex]) continue;
+            visited[flatIndex] = true;
 
-            // Propagate accumulation downslope
-            if (flowX[cy][cx] != 0 || flowY[cy][cx] != 0) {
-                float fx = flowX[cy][cx];
-                float fy = flowY[cy][cx];
-
-                // Find which neighbor is the flow target
-                float bestDist = Float.MAX_VALUE;
-                int targetY = cy, targetX = cx;
-
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        if (dx == 0 && dy == 0) continue;
-
-                        float dist = Math.abs(dx - fx) + Math.abs(dy - fy);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            targetY = cy + dy;
-                            targetX = cx + dx;
-                        }
-                    }
-                }
-
-                // Clamp y, wrap x
-                if (targetY >= 0 && targetY < H) {
-                    targetX = (targetX + W) % W;
-                    accum[targetY][targetX] += accum[cy][cx];
-                }
+            int ty = targetY[cy][cx];
+            if (ty >= 0) {
+                int tx = targetX[cy][cx];
+                accum[ty][tx] += accum[cy][cx];
             }
         }
 
-        return new FlowField(flowX, flowY, accum);
+        return new FlowField(flowX, flowY, accum, slope, targetY, targetX);
     }
 
     /**
-     * Helper class for priority queue sorting by elevation.
+     * Convenience overload that allocates a workspace on each call.
+     * Prefer {@link #compute(float[][], Workspace)} when invoked repeatedly.
+     */
+    public static FlowField compute(float[][] h) {
+        Workspace workspace = new Workspace(h.length, h[0].length);
+        return compute(h, workspace);
+    }
+
+    /**
+     * Reusable buffers for flow computation to avoid repeated allocations.
+     */
+    public static final class Workspace {
+        private final PriorityQueue<Cell> queue;
+        float[][] flowX;
+        float[][] flowY;
+        float[][] accum;
+        float[][] slope;
+        int[][] targetY;
+        int[][] targetX;
+        boolean[] visited;
+        Cell[] cells;
+        int height;
+        int width;
+
+        public Workspace(int height, int width) {
+            this.queue = new PriorityQueue<>((a, b) -> Float.compare(b.height, a.height));
+            resize(height, width);
+        }
+
+        public void ensureCapacity(int height, int width) {
+            if (height != this.height || width != this.width) {
+                resize(height, width);
+            }
+        }
+
+        private void resize(int height, int width) {
+            this.height = height;
+            this.width = width;
+
+            flowX = new float[height][width];
+            flowY = new float[height][width];
+            accum = new float[height][width];
+            slope = new float[height][width];
+            targetY = new int[height][width];
+            targetX = new int[height][width];
+            visited = new boolean[height * width];
+
+            cells = new Cell[height * width];
+            int idx = 0;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    cells[idx++] = new Cell(y, x);
+                }
+            }
+
+            queue.clear();
+        }
+    }
+
+    /**
+     * Cell metadata reused during priority queue processing.
      */
     private static final class Cell {
         final int y;
         final int x;
-        final float height;
+        float height;
 
-        Cell(int y, int x, float height) {
+        Cell(int y, int x) {
             this.y = y;
             this.x = x;
-            this.height = height;
         }
     }
 }

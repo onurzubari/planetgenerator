@@ -1,5 +1,7 @@
 package com.onur.planetgen.erosion;
 
+import java.util.Arrays;
+
 public final class HydraulicErosion {
     private HydraulicErosion() {}
 
@@ -26,151 +28,139 @@ public final class HydraulicErosion {
         int H = h.length;
         int W = h[0].length;
 
-        // Water and sediment fields
+        // Water and sediment fields (reused between iterations)
         float[][] water = new float[H][W];
         float[][] sediment = new float[H][W];
+        float[][] nextWater = new float[H][W];
+        float[][] nextSediment = new float[H][W];
+        float[][] newHeight = new float[H][W];
 
-        // Parameters
-        double sedimentCapacityFactor = 0.01;  // Controls how much sediment water can carry
-        double minCapacity = 0.0001;            // Minimum sediment capacity
-        double erosionRate = 0.1;               // How aggressively to erode
-        double depositionRate = 0.1;            // How aggressively to deposit
+        FlowField.Workspace flowWorkspace = new FlowField.Workspace(H, W);
+
+        final float rainfallF = (float) rainfall;
+        final float evaporationFactor = (float) (1.0 - evaporation);
+        final float minWater = 0.001f;
+        final float minSlope = 0.001f;
+        final float sedimentCapacityFactor = (float) 0.01;
+        final float minCapacity = (float) 0.0001;
+        final float erosionRate = (float) 0.1;
+        final float depositionRate = (float) 0.1;
 
         for (int iter = 0; iter < iterations; iter++) {
             // 1. Add rainfall uniformly
             for (int y = 0; y < H; y++) {
+                float[] waterRow = water[y];
                 for (int x = 0; x < W; x++) {
-                    water[y][x] += (float) rainfall;
+                    waterRow[x] += rainfallF;
                 }
             }
 
-            // 2. Compute flow field (most expensive step)
-            FlowField flow = FlowField.compute(h);
+            // 2. Compute flow field (reuse buffers)
+            FlowField flow = FlowField.compute(h, flowWorkspace);
+            float[][] slope = flow.slope;
+            float[][] accumulation = flow.accum;
+            int[][] targetY = flow.targetY;
+            int[][] targetX = flow.targetX;
 
-            // 3. Process each cell for erosion/deposition
-            float[][] newHeight = new float[H][W];
+            // 3. Copy height into working buffer for erosion edits
             for (int y = 0; y < H; y++) {
-                for (int x = 0; x < W; x++) {
-                    newHeight[y][x] = h[y][x];
-                }
+                System.arraycopy(h[y], 0, newHeight[y], 0, W);
             }
 
+            // Apply erosion/deposition per cell
             for (int y = 0; y < H; y++) {
+                float[] waterRow = water[y];
+                float[] sedimentRow = sediment[y];
+                float[] newHeightRow = newHeight[y];
+                float[] slopeRow = slope[y];
+                float[] accumRow = accumulation[y];
+
                 for (int x = 0; x < W; x++) {
-                    float w = water[y][x];
-                    float s = sediment[y][x];
+                    float w = waterRow[x];
+                    if (w < minWater) continue; // Skip dry cells
 
-                    if (w < 0.001) continue; // Skip dry cells
+                    float s = sedimentRow[x];
+                    float slopeValue = slopeRow[x];
+                    if (slopeValue < minSlope) slopeValue = minSlope;
 
-                    // Calculate slope (approximate via neighbors)
-                    float slope = estimateSlope(h, x, y);
-                    slope = Math.max(0.001f, slope); // Avoid division by zero
+                    // Sediment carrying capacity: C = k_cap * water * slope * (1 + accumulation)
+                    float capacity = sedimentCapacityFactor * w * slopeValue * (1.0f + accumRow[x]);
+                    if (capacity < minCapacity) capacity = minCapacity;
 
-                    // Sediment carrying capacity: C = k_cap * |flow| * slope
-                    float flowMagnitude = (float) Math.sqrt(flow.flowX[y][x] * flow.flowX[y][x] +
-                                                             flow.flowY[y][x] * flow.flowY[y][x]);
-                    float capacity = (float) (sedimentCapacityFactor * w * slope * (1.0 + flow.accum[y][x]));
-                    capacity = Math.max((float) minCapacity, capacity);
-
-                    // Erode or deposit sediment
                     if (s < capacity) {
-                        // Can carry more: erode from bed
-                        float erosion = (float) (erosionRate * (capacity - s) * w);
-                        newHeight[y][x] -= erosion;
-                        sediment[y][x] += erosion;
+                        // Erode from the bed
+                        float erosion = erosionRate * (capacity - s) * w;
+                        newHeightRow[x] -= erosion;
+                        sedimentRow[x] += erosion;
                     } else {
-                        // Carrying too much: deposit
-                        float deposition = (float) (depositionRate * (s - capacity));
-                        newHeight[y][x] += deposition;
-                        sediment[y][x] -= deposition;
+                        // Deposit excess sediment
+                        float deposition = depositionRate * (s - capacity);
+                        newHeightRow[x] += deposition;
+                        sedimentRow[x] -= deposition;
                     }
                 }
             }
 
-            // 4. Advect water and sediment downslope
-            float[][] newWater = new float[H][W];
-            float[][] newSediment = new float[H][W];
+            // Ensure next buffers are clean before advection
+            clear(nextWater);
+            clear(nextSediment);
 
+            // 4. Advect water and sediment downslope using precomputed targets
             for (int y = 0; y < H; y++) {
+                float[] waterRow = water[y];
+                float[] sedimentRow = sediment[y];
                 for (int x = 0; x < W; x++) {
-                    if (water[y][x] < 0.001) continue;
+                    float w = waterRow[x];
+                    if (w < minWater) continue;
 
-                    // Flow to downslope neighbor
-                    float fx = flow.flowX[y][x];
-                    float fy = flow.flowY[y][x];
-
-                    if (Math.abs(fx) < 0.001 && Math.abs(fy) < 0.001) {
-                        // Local minimum (sink) - accumulate water
-                        newWater[y][x] += water[y][x];
-                        newSediment[y][x] += sediment[y][x];
+                    float s = sedimentRow[x];
+                    int ty = targetY[y][x];
+                    if (ty < 0) {
+                        nextWater[y][x] += w;
+                        nextSediment[y][x] += s;
                     } else {
-                        // Find best neighbor in flow direction
-                        int bestNy = y, bestNx = x;
-                        float bestDist = Float.MAX_VALUE;
-
-                        for (int dy = -1; dy <= 1; dy++) {
-                            for (int dx = -1; dx <= 1; dx++) {
-                                if (dx == 0 && dy == 0) continue;
-
-                                float dist = Math.abs(dx - fx) + Math.abs(dy - fy);
-                                if (dist < bestDist) {
-                                    bestDist = dist;
-                                    bestNy = y + dy;
-                                    bestNx = x + dx;
-                                }
-                            }
-                        }
-
-                        // Clamp y, wrap x
-                        if (bestNy >= 0 && bestNy < H) {
-                            bestNx = (bestNx + W) % W;
-                            newWater[bestNy][bestNx] += water[y][x];
-                            newSediment[bestNy][bestNx] += sediment[y][x];
-                        } else {
-                            // Flow out of bounds at poles - keep locally
-                            newWater[y][x] += water[y][x];
-                            newSediment[y][x] += sediment[y][x];
-                        }
+                        int tx = targetX[y][x];
+                        nextWater[ty][tx] += w;
+                        nextSediment[ty][tx] += s;
                     }
                 }
             }
 
-            water = newWater;
-            sediment = newSediment;
+            // Swap current and next buffers
+            float[][] tmpWater = water;
+            water = nextWater;
+            nextWater = tmpWater;
 
-            // 5. Apply height changes
+            float[][] tmpSediment = sediment;
+            sediment = nextSediment;
+            nextSediment = tmpSediment;
+
+            // 5. Apply height changes back onto the height field
             for (int y = 0; y < H; y++) {
-                for (int x = 0; x < W; x++) {
-                    h[y][x] = newHeight[y][x];
-                }
+                System.arraycopy(newHeight[y], 0, h[y], 0, W);
             }
 
-            // 6. Evaporate water
+            // 6. Evaporate water and settle remaining suspended sediment
             for (int y = 0; y < H; y++) {
+                float[] waterRow = water[y];
+                float[] sedimentRow = sediment[y];
+                float[] heightRow = h[y];
+
                 for (int x = 0; x < W; x++) {
-                    water[y][x] *= (float) (1.0 - evaporation);
-                    // Sediment settles out as water evaporates
-                    if (water[y][x] < 0.001) {
-                        h[y][x] += sediment[y][x];
-                        sediment[y][x] = 0;
+                    float w = waterRow[x] *= evaporationFactor;
+                    if (w < minWater) {
+                        heightRow[x] += sedimentRow[x];
+                        sedimentRow[x] = 0f;
+                        waterRow[x] = 0f;
                     }
                 }
             }
         }
     }
 
-    private static float estimateSlope(float[][] h, int x, int y) {
-        int H = h.length;
-        int W = h[0].length;
-
-        int xW = (x - 1 + W) % W;
-        int xE = (x + 1) % W;
-        int yN = Math.max(0, y - 1);
-        int yS = Math.min(H - 1, y + 1);
-
-        float dhdx = (h[y][xE] - h[y][xW]) * 0.5f;
-        float dhdy = (h[yS][x] - h[yN][x]) * 0.5f;
-
-        return (float) Math.sqrt(dhdx * dhdx + dhdy * dhdy);
+    private static void clear(float[][] data) {
+        for (float[] row : data) {
+            Arrays.fill(row, 0f);
+        }
     }
 }
