@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(./gradlew build:*)",
+      "Bash(gradle build:*)",
+      "Bash(gradle test:*)",
+      "Bash(gradle clean build:*)",
+      "Bash(gradle run:*)",
+      "Read(//c/tmp/test_output/**)"
     ],
     "deny": [],
     "ask": []
