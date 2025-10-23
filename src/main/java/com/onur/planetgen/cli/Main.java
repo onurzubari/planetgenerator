@@ -1,23 +1,25 @@
 package com.onur.planetgen.cli;
 
 import picocli.CommandLine;
-import java.nio.file.*;
-import java.util.*;
 
-import com.onur.planetgen.planet.SphericalSampler;
-import com.onur.planetgen.planet.HeightField;
-import com.onur.planetgen.planet.ParallelHeightFieldGenerator;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+import com.onur.planetgen.config.Preset;
 import com.onur.planetgen.planet.CoordinateCache;
-import com.onur.planetgen.render.AlbedoRenderer;
-import com.onur.planetgen.render.NormalMapRenderer;
-import com.onur.planetgen.render.RoughnessRenderer;
+import com.onur.planetgen.planet.ParallelHeightFieldGenerator;
+import com.onur.planetgen.planet.SphericalSampler;
 import com.onur.planetgen.render.CloudRenderer;
 import com.onur.planetgen.render.EmissiveRenderer;
-import com.onur.planetgen.render.AmbientOcclusionRenderer;
-import com.onur.planetgen.atmosphere.CloudField;
+import com.onur.planetgen.render.NormalMapRenderer;
+import com.onur.planetgen.render.RenderUtil;
+import com.onur.planetgen.render.SurfaceAnalyzer;
 import com.onur.planetgen.atmosphere.MultiLayerCloudField;
 import com.onur.planetgen.util.ImageUtil;
-import com.onur.planetgen.config.Preset;
 
 @CommandLine.Command(name = "planetgen", mixinStandardHelpOptions = true,
         description = "Procedural planet texture generator (2:1 equirectangular)")
@@ -34,7 +36,7 @@ public class Main implements Runnable {
     String presetName;
 
     @CommandLine.Option(names = "--export", split = ",",
-            description = "Maps to export: albedo,height,normal,roughness,clouds,emissive,ao",
+            description = "Maps to export: albedo,height,normal,roughness,clouds,emissive,ao,metallic,pbrpack,biome,vegetation,detail,snow,atmosphere,ocean,material",
             defaultValue = "albedo,height,normal,roughness,clouds")
     List<String> export;
 
@@ -49,93 +51,143 @@ public class Main implements Runnable {
     @Override
     public void run() {
         try {
-            // Parse resolution
             String[] wh = resolution.toLowerCase(Locale.ROOT).split("x");
-            int W = Integer.parseInt(wh[0]);
-            int H = Integer.parseInt(wh[1]);
-            if (W != 2 * H) throw new IllegalArgumentException("Resolution must be 2:1 (e.g., 4096x2048)");
-            Files.createDirectories(outDir);
+            int width = Integer.parseInt(wh[0]);
+            int heightPx = Integer.parseInt(wh[1]);
+            if (width != 2 * heightPx) {
+                throw new IllegalArgumentException("Resolution must be 2:1 (e.g., 4096x2048)");
+            }
 
-            // Load preset (Phase 3 feature)
+            Files.createDirectories(outDir);
+            Set<String> exportSet = new HashSet<>();
+            for (String entry : export) {
+                exportSet.add(entry.toLowerCase(Locale.ROOT));
+            }
+
             System.out.println("Loading preset: " + presetName);
             Preset preset = new Preset(presetName);
             System.out.println(preset);
 
-            // Generate terrain and apply erosion with parallel processing
-            var sampler = new SphericalSampler(W, H);
+            SphericalSampler sampler = new SphericalSampler(width, heightPx);
             System.out.println("Generating height field with " + presetName + " preset (parallel)...");
             long startTime = System.currentTimeMillis();
-            var coordCache = new CoordinateCache(W, H, sampler);
-            var height = ParallelHeightFieldGenerator.generateParallel(seed, sampler, preset);
+            CoordinateCache coordCache = new CoordinateCache(width, heightPx, sampler);
+            float[][] heightField = ParallelHeightFieldGenerator.generateParallel(seed, sampler, preset);
             long terrainTime = System.currentTimeMillis() - startTime;
 
-            // Apply erosion
             System.out.println("Applying thermal erosion (" + preset.thermalIterations + " iterations)...");
             startTime = System.currentTimeMillis();
-            com.onur.planetgen.erosion.ThermalErosion.apply(height, preset.thermalIterations,
+            com.onur.planetgen.erosion.ThermalErosion.apply(heightField, preset.thermalIterations,
                     preset.thermalTalus, preset.thermalK);
             long thermalTime = System.currentTimeMillis() - startTime;
 
             System.out.println("Applying hydraulic erosion (" + preset.hydraulicIterations + " iterations)...");
             startTime = System.currentTimeMillis();
-            com.onur.planetgen.erosion.HydraulicErosion.apply(height, preset.hydraulicIterations,
+            com.onur.planetgen.erosion.HydraulicErosion.apply(heightField, preset.hydraulicIterations,
                     preset.rainfall, preset.evaporation);
             long hydraulicTime = System.currentTimeMillis() - startTime;
 
-            System.out.println(String.format("Terrain: %.1fs, Thermal: %.1fs, Hydraulic: %.1fs",
-                    terrainTime / 1000.0, thermalTime / 1000.0, hydraulicTime / 1000.0));
+            System.out.printf(Locale.ROOT, "Terrain: %.1fs, Thermal: %.1fs, Hydraulic: %.1fs%n",
+                    terrainTime / 1000.0, thermalTime / 1000.0, hydraulicTime / 1000.0);
 
-            // Export requested maps
-            if (export.contains("albedo")) {
-                System.out.println("Rendering albedo with hydrology...");
-                var argb = AlbedoRenderer.renderWithHydrology(height, preset);
-                ImageUtil.saveARGB(argb, outDir.resolve("planet_albedo_" + W + "x" + H + ".png"));
+            SurfaceAnalyzer.SurfaceData surface = SurfaceAnalyzer.analyze(heightField, preset, seed);
+
+            if (exportSet.contains("albedo")) {
+                System.out.println("Saving albedo map...");
+                ImageUtil.saveARGB(surface.albedo(), outDir.resolve("planet_albedo_" + width + "x" + heightPx + ".png"));
             }
 
-            if (export.contains("normal")) {
+            if (exportSet.contains("normal")) {
                 System.out.println("Rendering normals...");
-                var argbN = NormalMapRenderer.render(height);
-                ImageUtil.saveARGB(argbN, outDir.resolve("planet_normal.png"));
+                int[][] normals = NormalMapRenderer.render(heightField);
+                ImageUtil.saveARGB(normals, outDir.resolve("planet_normal.png"));
             }
 
-            if (export.contains("roughness")) {
-                System.out.println("Rendering roughness...");
-                var gray = RoughnessRenderer.render(height);
-                ImageUtil.saveGray8(gray, outDir.resolve("planet_roughness.png"));
+            if (exportSet.contains("roughness")) {
+                System.out.println("Saving roughness map...");
+                ImageUtil.saveGray8(RenderUtil.toGray8(surface.roughness()),
+                        outDir.resolve("planet_roughness.png"));
             }
 
-            if (export.contains("height")) {
-                System.out.println("Exporting height map...");
-                ImageUtil.saveGray16(height, outDir.resolve("planet_height_16u.png"));
+            if (exportSet.contains("metallic")) {
+                System.out.println("Saving metallic map...");
+                ImageUtil.saveGray8(RenderUtil.toGray8(surface.metallic()),
+                        outDir.resolve("planet_metallic.png"));
             }
 
-            if (export.contains("clouds")) {
+            if (exportSet.contains("pbrpack")) {
+                System.out.println("Packing AO/Roughness/Metallic...");
+                ImageUtil.saveARGB(RenderUtil.packToRgb(surface.ambientOcclusion(),
+                                surface.roughness(), surface.metallic()),
+                        outDir.resolve("planet_pbr_pack.png"));
+            }
+
+            if (exportSet.contains("ao")) {
+                System.out.println("Saving ambient occlusion map...");
+                ImageUtil.saveGray8(RenderUtil.toGray8(surface.ambientOcclusion()),
+                        outDir.resolve("planet_ao.png"));
+            }
+
+            if (exportSet.contains("height")) {
+                System.out.println("Saving height map...");
+                ImageUtil.saveGray16(heightField, outDir.resolve("planet_height_16u.png"));
+            }
+
+            if (exportSet.contains("biome")) {
+                System.out.println("Saving biome mask...");
+                ImageUtil.saveARGB(surface.biomeMask(), outDir.resolve("planet_biome_mask.png"));
+            }
+
+            if (exportSet.contains("material")) {
+                System.out.println("Saving material mask...");
+                ImageUtil.saveARGB(surface.materialMask(), outDir.resolve("planet_material_mask.png"));
+            }
+
+            if (exportSet.contains("vegetation")) {
+                System.out.println("Saving vegetation density...");
+                ImageUtil.saveGray8(RenderUtil.toGray8(surface.vegetation()),
+                        outDir.resolve("planet_vegetation_density.png"));
+            }
+
+            if (exportSet.contains("detail")) {
+                System.out.println("Saving terrain detail map...");
+                ImageUtil.saveGray8(RenderUtil.toGray8(surface.detail()),
+                        outDir.resolve("planet_detail_map.png"));
+            }
+
+            if (exportSet.contains("snow")) {
+                System.out.println("Saving snow/weathering mask...");
+                ImageUtil.saveGray8(RenderUtil.toGray8(surface.snow()),
+                        outDir.resolve("planet_snow_mask.png"));
+            }
+
+            if (exportSet.contains("ocean")) {
+                System.out.println("Saving ocean shading map...");
+                ImageUtil.saveARGB(surface.oceanShading(), outDir.resolve("planet_ocean_shading.png"));
+            }
+
+            if (exportSet.contains("atmosphere")) {
+                System.out.println("Saving atmosphere overlay...");
+                ImageUtil.saveARGB(surface.atmosphere(), outDir.resolve("planet_atmosphere.png"));
+            }
+
+            if (exportSet.contains("clouds")) {
                 System.out.println("Generating multi-layer clouds...");
                 long cloudStart = System.currentTimeMillis();
                 var cloudField = MultiLayerCloudField.generateParallel(seed + 1, sampler, preset, coordCache);
                 long cloudTime = System.currentTimeMillis() - cloudStart;
-                System.out.println(String.format("Cloud generation: %.1fs", cloudTime / 1000.0));
-                var argbC = CloudRenderer.render(cloudField);
-                ImageUtil.saveARGB(argbC, outDir.resolve("planet_clouds.png"));
+                System.out.printf(Locale.ROOT, "Cloud generation: %.1fs%n", cloudTime / 1000.0);
+                int[][] clouds = CloudRenderer.render(cloudField);
+                ImageUtil.saveARGB(clouds, outDir.resolve("planet_clouds.png"));
             }
 
-            if (export.contains("emissive")) {
+            if (exportSet.contains("emissive")) {
                 System.out.println("Rendering emissive map...");
-                var argbE = EmissiveRenderer.render(height, preset, seed);
-                ImageUtil.saveARGB(argbE, outDir.resolve("planet_emissive.png"));
+                int[][] emissive = EmissiveRenderer.render(heightField, preset, seed);
+                ImageUtil.saveARGB(emissive, outDir.resolve("planet_emissive.png"));
             }
 
-            if (export.contains("ao")) {
-                System.out.println("Rendering ambient occlusion...");
-                long aoStart = System.currentTimeMillis();
-                var ao = AmbientOcclusionRenderer.render(height);
-                ao = AmbientOcclusionRenderer.smooth(ao, 1);
-                long aoTime = System.currentTimeMillis() - aoStart;
-                System.out.println(String.format("AO generation: %.1fs", aoTime / 1000.0));
-                ImageUtil.saveGray8(ao, outDir.resolve("planet_ao.png"));
-            }
-
-            System.out.println("Done → " + outDir.toAbsolutePath());
+            System.out.println("Done -> " + outDir.toAbsolutePath());
         } catch (Exception e) {
             System.err.println("Error during generation:");
             e.printStackTrace();

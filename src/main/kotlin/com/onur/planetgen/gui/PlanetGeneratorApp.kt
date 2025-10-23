@@ -1029,9 +1029,18 @@ private fun buildOutputPath(map: ExportMap, request: GenerationRequest): Path {
         ExportMap.HEIGHT -> "planet_height"
         ExportMap.NORMAL -> "planet_normal"
         ExportMap.ROUGHNESS -> "planet_roughness"
+        ExportMap.METALLIC -> "planet_metallic"
+        ExportMap.PBR -> "planet_pbr_pack"
+        ExportMap.AO -> "planet_ao"
+        ExportMap.BIOME -> "planet_biome_mask"
+        ExportMap.MATERIAL -> "planet_material_mask"
+        ExportMap.VEGETATION -> "planet_vegetation_density"
+        ExportMap.DETAIL -> "planet_detail_map"
+        ExportMap.SNOW -> "planet_snow_mask"
+        ExportMap.OCEAN -> "planet_ocean_shading"
+        ExportMap.ATMOSPHERE -> "planet_atmosphere"
         ExportMap.CLOUDS -> "planet_clouds"
         ExportMap.EMISSIVE -> "planet_emissive"
-        ExportMap.AO -> "planet_ao"
     }
     val suffix = if (map == ExportMap.HEIGHT) "_16u" else ""
     val fileName = "${base}_${presetSlug}_${request.seed}_${request.width}x${request.height}$suffix.png"
@@ -1100,14 +1109,15 @@ suspend fun generatePlanet(
         onLog("Hydraulic erosion done in ${hydraulicDuration.seconds}.${hydraulicDuration.toMillisPart()}s")
     }
 
+    val surface = SurfaceAnalyzer.analyze(heightField, preset, request.seed)
+
     val exportedMaps = mutableListOf<String>()
     var previewImagePath: Path? = null
 
     if (ExportMap.ALBEDO in request.exports) {
         onLog("Rendering albedo with hydrology overlays...")
-        val argb = AlbedoRenderer.renderWithHydrology(heightField, preset)
         val path = uniquePath(buildOutputPath(ExportMap.ALBEDO, request))
-        ImageUtil.saveARGB(argb, path)
+        ImageUtil.saveARGB(surface.albedo(), path)
         onLog("Saved albedo -> ${path.fileName}")
         previewImagePath = path
         exportedMaps += path.fileName.toString()
@@ -1123,11 +1133,91 @@ suspend fun generatePlanet(
     }
 
     if (ExportMap.ROUGHNESS in request.exports) {
-        onLog("Rendering roughness...")
-        val roughness = RoughnessRenderer.render(heightField)
+        onLog("Exporting roughness map...")
         val path = uniquePath(buildOutputPath(ExportMap.ROUGHNESS, request))
-        ImageUtil.saveGray8(roughness, path)
+        ImageUtil.saveGray8(RenderUtil.toGray8(surface.roughness()), path)
         onLog("Saved roughness -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.METALLIC in request.exports) {
+        onLog("Exporting metallic map...")
+        val path = uniquePath(buildOutputPath(ExportMap.METALLIC, request))
+        ImageUtil.saveGray8(RenderUtil.toGray8(surface.metallic()), path)
+        onLog("Saved metallic -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.PBR in request.exports) {
+        onLog("Packing AO/Roughness/Metallic...")
+        val pack = RenderUtil.packToRgb(surface.ambientOcclusion(), surface.roughness(), surface.metallic())
+        val path = uniquePath(buildOutputPath(ExportMap.PBR, request))
+        ImageUtil.saveARGB(pack, path)
+        onLog("Saved PBR pack -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.AO in request.exports) {
+        onLog("Exporting ambient occlusion...")
+        val path = uniquePath(buildOutputPath(ExportMap.AO, request))
+        ImageUtil.saveGray8(RenderUtil.toGray8(surface.ambientOcclusion()), path)
+        onLog("Saved AO -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.BIOME in request.exports) {
+        onLog("Exporting biome mask...")
+        val path = uniquePath(buildOutputPath(ExportMap.BIOME, request))
+        ImageUtil.saveARGB(surface.biomeMask(), path)
+        onLog("Saved biome mask -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.MATERIAL in request.exports) {
+        onLog("Exporting material mask...")
+        val path = uniquePath(buildOutputPath(ExportMap.MATERIAL, request))
+        ImageUtil.saveARGB(surface.materialMask(), path)
+        onLog("Saved material mask -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.VEGETATION in request.exports) {
+        onLog("Exporting vegetation density...")
+        val path = uniquePath(buildOutputPath(ExportMap.VEGETATION, request))
+        ImageUtil.saveGray8(RenderUtil.toGray8(surface.vegetation()), path)
+        onLog("Saved vegetation -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.DETAIL in request.exports) {
+        onLog("Exporting terrain detail map...")
+        val path = uniquePath(buildOutputPath(ExportMap.DETAIL, request))
+        ImageUtil.saveGray8(RenderUtil.toGray8(surface.detail()), path)
+        onLog("Saved detail -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.SNOW in request.exports) {
+        onLog("Exporting snow/weathering mask...")
+        val path = uniquePath(buildOutputPath(ExportMap.SNOW, request))
+        ImageUtil.saveGray8(RenderUtil.toGray8(surface.snow()), path)
+        onLog("Saved snow mask -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.OCEAN in request.exports) {
+        onLog("Exporting ocean shading map...")
+        val path = uniquePath(buildOutputPath(ExportMap.OCEAN, request))
+        ImageUtil.saveARGB(surface.oceanShading(), path)
+        onLog("Saved ocean shading -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
+    }
+
+    if (ExportMap.ATMOSPHERE in request.exports) {
+        onLog("Exporting atmosphere overlay...")
+        val path = uniquePath(buildOutputPath(ExportMap.ATMOSPHERE, request))
+        ImageUtil.saveARGB(surface.atmosphere(), path)
+        onLog("Saved atmosphere -> ${path.fileName}")
         exportedMaps += path.fileName.toString()
     }
 
@@ -1246,9 +1336,18 @@ enum class ExportMap(val label: String, val defaultSelected: Boolean) {
     HEIGHT("Height", true),
     NORMAL("Normal", true),
     ROUGHNESS("Roughness", true),
+    METALLIC("Metallic", false),
+    PBR("PBR Pack (AO/Rough/Metal)", false),
+    AO("Ambient Occlusion", false),
+    BIOME("Biome Mask", false),
+    MATERIAL("Material Mask", false),
+    VEGETATION("Vegetation Density", false),
+    DETAIL("Detail Map", false),
+    SNOW("Snow Mask", false),
+    OCEAN("Ocean Shading", false),
+    ATMOSPHERE("Atmosphere Overlay", false),
     CLOUDS("Clouds", true),
-    EMISSIVE("Emissive", false),
-    AO("Ambient Occlusion", false)
+    EMISSIVE("Emissive", false)
 }
 
 data class ParameterOverrides(
