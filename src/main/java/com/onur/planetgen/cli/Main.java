@@ -13,6 +13,7 @@ import com.onur.planetgen.render.NormalMapRenderer;
 import com.onur.planetgen.render.RoughnessRenderer;
 import com.onur.planetgen.render.CloudRenderer;
 import com.onur.planetgen.render.EmissiveRenderer;
+import com.onur.planetgen.render.AmbientOcclusionRenderer;
 import com.onur.planetgen.atmosphere.CloudField;
 import com.onur.planetgen.atmosphere.MultiLayerCloudField;
 import com.onur.planetgen.util.ImageUtil;
@@ -33,7 +34,7 @@ public class Main implements Runnable {
     String presetName;
 
     @CommandLine.Option(names = "--export", split = ",",
-            description = "Maps to export: albedo,height,normal,roughness,clouds,emissive",
+            description = "Maps to export: albedo,height,normal,roughness,clouds,emissive,ao",
             defaultValue = "albedo,height,normal,roughness,clouds")
     List<String> export;
 
@@ -122,6 +123,16 @@ public class Main implements Runnable {
                 System.out.println("Rendering emissive map...");
                 var argbE = EmissiveRenderer.render(height, preset, seed);
                 ImageUtil.saveARGB(argbE, outDir.resolve("planet_emissive.png"));
+            }
+
+            if (export.contains("ao")) {
+                System.out.println("Rendering ambient occlusion...");
+                long aoStart = System.currentTimeMillis();
+                var ao = AmbientOcclusionRenderer.render(height);
+                ao = AmbientOcclusionRenderer.smooth(ao, 1);
+                long aoTime = System.currentTimeMillis() - aoStart;
+                System.out.println(String.format("AO generation: %.1fs", aoTime / 1000.0));
+                ImageUtil.saveGray8(ao, outDir.resolve("planet_ao.png"));
             }
 
             System.out.println("Done → " + outDir.toAbsolutePath());

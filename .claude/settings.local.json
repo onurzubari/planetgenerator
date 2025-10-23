@@ -7,7 +7,8 @@
       "Bash(gradle test:*)",
       "Bash(gradle clean build:*)",
       "Bash(gradle run:*)",
-      "Read(//c/tmp/test_output/**)"
+      "Read(//c/tmp/test_output/**)",
+      "Bash(xargs:*)"
     ],
     "deny": [],
     "ask": []
