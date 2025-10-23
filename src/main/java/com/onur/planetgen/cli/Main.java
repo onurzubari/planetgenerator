@@ -6,12 +6,15 @@ import java.util.*;
 
 import com.onur.planetgen.planet.SphericalSampler;
 import com.onur.planetgen.planet.HeightField;
+import com.onur.planetgen.planet.ParallelHeightFieldGenerator;
+import com.onur.planetgen.planet.CoordinateCache;
 import com.onur.planetgen.render.AlbedoRenderer;
 import com.onur.planetgen.render.NormalMapRenderer;
 import com.onur.planetgen.render.RoughnessRenderer;
 import com.onur.planetgen.render.CloudRenderer;
 import com.onur.planetgen.render.EmissiveRenderer;
 import com.onur.planetgen.atmosphere.CloudField;
+import com.onur.planetgen.atmosphere.MultiLayerCloudField;
 import com.onur.planetgen.util.ImageUtil;
 import com.onur.planetgen.config.Preset;
 
@@ -57,15 +60,34 @@ public class Main implements Runnable {
             Preset preset = new Preset(presetName);
             System.out.println(preset);
 
-            // Generate terrain and apply erosion
+            // Generate terrain and apply erosion with parallel processing
             var sampler = new SphericalSampler(W, H);
-            System.out.println("Generating height field with " + presetName + " preset...");
-            var height = HeightField.generate(seed, sampler, preset);
+            System.out.println("Generating height field with " + presetName + " preset (parallel)...");
+            long startTime = System.currentTimeMillis();
+            var coordCache = new CoordinateCache(W, H, sampler);
+            var height = ParallelHeightFieldGenerator.generateParallel(seed, sampler, preset);
+            long terrainTime = System.currentTimeMillis() - startTime;
+
+            // Apply erosion
+            System.out.println("Applying thermal erosion (" + preset.thermalIterations + " iterations)...");
+            startTime = System.currentTimeMillis();
+            com.onur.planetgen.erosion.ThermalErosion.apply(height, preset.thermalIterations,
+                    preset.thermalTalus, preset.thermalK);
+            long thermalTime = System.currentTimeMillis() - startTime;
+
+            System.out.println("Applying hydraulic erosion (" + preset.hydraulicIterations + " iterations)...");
+            startTime = System.currentTimeMillis();
+            com.onur.planetgen.erosion.HydraulicErosion.apply(height, preset.hydraulicIterations,
+                    preset.rainfall, preset.evaporation);
+            long hydraulicTime = System.currentTimeMillis() - startTime;
+
+            System.out.println(String.format("Terrain: %.1fs, Thermal: %.1fs, Hydraulic: %.1fs",
+                    terrainTime / 1000.0, thermalTime / 1000.0, hydraulicTime / 1000.0));
 
             // Export requested maps
             if (export.contains("albedo")) {
-                System.out.println("Rendering albedo...");
-                var argb = AlbedoRenderer.render(height);
+                System.out.println("Rendering albedo with hydrology...");
+                var argb = AlbedoRenderer.renderWithHydrology(height, preset);
                 ImageUtil.saveARGB(argb, outDir.resolve("planet_albedo_" + W + "x" + H + ".png"));
             }
 
@@ -87,9 +109,12 @@ public class Main implements Runnable {
             }
 
             if (export.contains("clouds")) {
-                System.out.println("Generating clouds...");
-                CloudField clouds = CloudField.generate(seed + 1, sampler);
-                var argbC = CloudRenderer.render(clouds);
+                System.out.println("Generating multi-layer clouds...");
+                long cloudStart = System.currentTimeMillis();
+                var cloudField = MultiLayerCloudField.generateParallel(seed + 1, sampler, preset, coordCache);
+                long cloudTime = System.currentTimeMillis() - cloudStart;
+                System.out.println(String.format("Cloud generation: %.1fs", cloudTime / 1000.0));
+                var argbC = CloudRenderer.render(cloudField);
                 ImageUtil.saveARGB(argbC, outDir.resolve("planet_clouds.png"));
             }
 

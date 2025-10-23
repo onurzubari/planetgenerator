@@ -3,6 +3,10 @@ package com.onur.planetgen.render;
 import com.onur.planetgen.planet.BiomeClassifier;
 import com.onur.planetgen.planet.ClimateModel;
 import com.onur.planetgen.planet.SphericalSampler;
+import com.onur.planetgen.erosion.FlowField;
+import com.onur.planetgen.hydrology.RiverDetector;
+import com.onur.planetgen.hydrology.LakeDetector;
+import com.onur.planetgen.config.Preset;
 
 public final class AlbedoRenderer {
     private AlbedoRenderer() {}
@@ -12,9 +16,30 @@ public final class AlbedoRenderer {
      * Uses biome-based coloring with height banding and subtle shading.
      */
     public static int[][] render(float[][] height) {
+        return renderWithHydrology(height, null);
+    }
+
+    /**
+     * Render albedo map with rivers and lakes.
+     * Computes flow field and detects hydrological features.
+     */
+    public static int[][] renderWithHydrology(float[][] height, Preset preset) {
         int H = height.length, W = height[0].length;
         int[][] argb = new int[H][W];
         SphericalSampler sampler = new SphericalSampler(W, H);
+
+        // Compute flow field and detect water features
+        System.out.println("Computing flow field for river detection...");
+        long flowStart = System.currentTimeMillis();
+        FlowField flowField = FlowField.compute(height);
+        float[][] rivers = RiverDetector.detectRivers(flowField, 0.4);
+        rivers = RiverDetector.smoothRivers(rivers, 1);
+        long flowTime = System.currentTimeMillis() - flowStart;
+        System.out.println(String.format("Hydrology computation: %.1fs", flowTime / 1000.0));
+
+        // Detect lakes
+        double lakeThreshold = (preset != null) ? preset.seaLevel : -0.05;
+        float[][] lakes = LakeDetector.detectLakes(height, lakeThreshold);
 
         for (int y = 0; y < H; y++) {
             double lat = sampler.lat(y);
@@ -32,6 +57,18 @@ public final class AlbedoRenderer {
                 // Add subtle ambient occlusion from slope
                 float slope = estimateSlope(height, x, y);
                 finalColor = applyAmbientOcclusion(finalColor, slope);
+
+                // Blend lakes (water color)
+                if (lakes[y][x] > 0.5f) {
+                    int[] waterColor = new int[]{30, 80, 180};
+                    blendColor(finalColor, waterColor, 0.8);
+                }
+
+                // Blend rivers (darker water lines)
+                if (rivers[y][x] > 0.1f) {
+                    int[] riverColor = new int[]{20, 60, 140};
+                    blendColor(finalColor, riverColor, Math.min(1.0, rivers[y][x] * 0.6));
+                }
 
                 // Add micro-variation via per-texel jitter
                 finalColor = addMicroVariation(finalColor, x, y);
