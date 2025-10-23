@@ -95,6 +95,7 @@ import java.time.Instant
 import java.util.*
 import kotlin.io.path.absolutePathString
 import kotlin.math.*
+import kotlin.random.Random
 
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "Planet Generator Studio") {
@@ -114,7 +115,8 @@ private fun PlanetGeneratorApp() {
     var presetExpanded by remember { mutableStateOf(false) }
     var selectedPreset by remember { mutableStateOf(PRESET_OPTIONS.first()) }
     var outDirText by remember { mutableStateOf(Paths.get("output").absolutePathString()) }
-    var applyHydraulic by remember { mutableStateOf(true) }
+    var applyHydraulic by remember { mutableStateOf(false) }
+    var batchCountText by remember { mutableStateOf("3") }
 
     val generatedFiles = remember { mutableStateListOf<Path>() }
     var currentOutputDir by remember { mutableStateOf<Path?>(null) }
@@ -144,6 +146,8 @@ private fun PlanetGeneratorApp() {
     var previewTab by remember { mutableStateOf(PreviewTab.STILL) }
     var settingsTab by remember { mutableStateOf(SettingsTab.GENERAL) }
 
+    val isBusy = generationState is GenerationState.Running || generationState is GenerationState.BatchRunning
+
     LaunchedEffect(logLines.size) {
         if (logLines.isNotEmpty()) {
             logListState.animateScrollToItem(logLines.size - 1)
@@ -159,6 +163,7 @@ private fun PlanetGeneratorApp() {
         thermalIterations = defaults.thermalIterations.toFloat()
         hydraulicIterations = defaults.hydraulicIterations.toFloat()
         cloudCoverage = defaults.cloudCoverage.toFloat()
+        applyHydraulic = false
     }
 
     Column(
@@ -193,7 +198,7 @@ private fun PlanetGeneratorApp() {
                         onValueChange = { seedText = it.filter { ch -> ch.isDigit() || ch == '-' } },
                         label = { Text("Seed") },
                         singleLine = true,
-                        enabled = generationState !is GenerationState.Running,
+                        enabled = !isBusy,
                         modifier = Modifier.weight(1f)
                     )
                     OutlinedTextField(
@@ -201,7 +206,7 @@ private fun PlanetGeneratorApp() {
                         onValueChange = { resolutionText = it },
                         label = { Text("Resolution (WxH)") },
                         singleLine = true,
-                        enabled = generationState !is GenerationState.Running,
+                        enabled = !isBusy,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -244,7 +249,7 @@ private fun PlanetGeneratorApp() {
                     onValueChange = { outDirText = it },
                     label = { Text("Output Folder") },
                     singleLine = true,
-                    enabled = generationState !is GenerationState.Running,
+                    enabled = !isBusy,
                     trailingIcon = {
                         IconButton(
                             onClick = {
@@ -277,7 +282,7 @@ private fun PlanetGeneratorApp() {
                                 Checkbox(
                                     checked = exportSelections[map] == true,
                                     onCheckedChange = { exportSelections[map] = it },
-                                    enabled = generationState !is GenerationState.Running
+                                    enabled = !isBusy
                                 )
                                 Text(map.label, style = MaterialTheme.typography.bodySmall)
                             }
@@ -317,7 +322,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { seaLevel = it },
                                 valueRange = -0.2f..0.3f,
                                 valueFormatter = { "%.2f".format(it) },
-                                enabled = generationState !is GenerationState.Running
+                                enabled = !isBusy
                             )
                             ParameterSlider(
                                 label = "Mountain intensity",
@@ -325,7 +330,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { mountainIntensity = it },
                                 valueRange = 0.5f..2.0f,
                                 valueFormatter = { "%.2f".format(it) },
-                                enabled = generationState !is GenerationState.Running
+                                enabled = !isBusy
                             )
                             ParameterSlider(
                                 label = "Rainfall",
@@ -333,7 +338,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { rainfall = it },
                                 valueRange = 0f..1f,
                                 valueFormatter = { "%.2f".format(it) },
-                                enabled = generationState !is GenerationState.Running
+                                enabled = !isBusy
                             )
                             ParameterSlider(
                                 label = "Evaporation",
@@ -341,7 +346,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { evaporation = it },
                                 valueRange = 0f..0.5f,
                                 valueFormatter = { "%.2f".format(it) },
-                                enabled = generationState !is GenerationState.Running
+                                enabled = !isBusy
                             )
                             ParameterSlider(
                                 label = "Thermal iterations",
@@ -349,7 +354,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { thermalIterations = it.roundToInt().coerceIn(0, 40).toFloat() },
                                 valueRange = 0f..40f,
                                 valueFormatter = { it.roundToInt().toString() },
-                                enabled = generationState !is GenerationState.Running,
+                                enabled = !isBusy,
                                 steps = 39
                             )
                             ParameterSlider(
@@ -358,7 +363,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { hydraulicIterations = it.roundToInt().coerceIn(0, 80).toFloat() },
                                 valueRange = 0f..80f,
                                 valueFormatter = { it.roundToInt().toString() },
-                                enabled = generationState !is GenerationState.Running,
+                                enabled = !isBusy,
                                 steps = 79
                             )
                             ParameterSlider(
@@ -367,7 +372,7 @@ private fun PlanetGeneratorApp() {
                                 onValueChange = { cloudCoverage = it },
                                 valueRange = 0f..1f,
                                 valueFormatter = { "%.2f".format(it) },
-                                enabled = generationState !is GenerationState.Running
+                                enabled = !isBusy
                             )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -376,7 +381,7 @@ private fun PlanetGeneratorApp() {
                                 Checkbox(
                                     checked = applyHydraulic,
                                     onCheckedChange = { applyHydraulic = it },
-                                    enabled = generationState !is GenerationState.Running
+                                    enabled = !isBusy
                                 )
                                 Text("Enable hydraulic erosion")
                             }
@@ -390,7 +395,7 @@ private fun PlanetGeneratorApp() {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val isRunning = generationState is GenerationState.Running
+                    val isRunning = isBusy
                     Button(
                         onClick = {
                             if (isRunning) {
@@ -443,6 +448,7 @@ private fun PlanetGeneratorApp() {
                                         renamingPath = null
                                         renameInput = ""
                                         logLines += "Finished in ${summary.totalDuration.toMillis() / 1000.0}s"
+                                        logLines += "Files -> ${summary.exportedMaps.joinToString()}"
                                         generationState = GenerationState.Completed(summary)
                                     }.onFailure { throwable ->
                                         if (throwable is CancellationException) {
@@ -484,12 +490,163 @@ private fun PlanetGeneratorApp() {
                     }
                 }
 
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = batchCountText,
+                        onValueChange = { input -> batchCountText = input.filter { it.isDigit() }.take(3) },
+                        label = { Text("Batch size") },
+                        singleLine = true,
+                        enabled = !isBusy,
+                        modifier = Modifier.width(140.dp)
+                    )
+                    Button(
+                        onClick = {
+                            val count = batchCountText.toIntOrNull()
+                            if (count == null || count <= 0) {
+                                logLines += "Batch size must be a positive integer."
+                                return@Button
+                            }
+                            val seed = seedText.toLongOrNull()
+                            if (seed == null) {
+                                logLines += "Seed must be a valid integer."
+                                return@Button
+                            }
+                            val request = buildRequest(
+                                seed = seed,
+                                resolutionText = resolutionText,
+                                presetOption = selectedPreset,
+                                outDirText = outDirText,
+                                exportSelections = exportSelections,
+                                applyHydraulic = applyHydraulic,
+                                overrides = ParameterOverrides(
+                                    seaLevel = seaLevel,
+                                    mountainIntensity = mountainIntensity,
+                                    rainfall = rainfall,
+                                    evaporation = evaporation,
+                                    thermalIterations = thermalIterations.roundToInt(),
+                                    hydraulicIterations = hydraulicIterations.roundToInt(),
+                                    cloudCoverage = cloudCoverage
+                                ),
+                                onError = { message -> logLines += message }
+                            ) ?: return@Button
+
+                            logLines.clear()
+                            logLines += "Starting batch generation of $count planets..."
+                            generationState = GenerationState.BatchRunning(completed = 0, total = count)
+
+                            val rng = Random(System.currentTimeMillis())
+                            activeJob = coroutineScope.launch {
+                                val summaries = mutableListOf<GenerationSummary>()
+                                try {
+                                    for (index in 0 until count) {
+                                        ensureActive()
+                                        val presetOption = PRESET_OPTIONS.random(rng)
+                                        val overrides = randomOverrides(rng)
+                                        val applyHydraulicRun = rng.nextBoolean()
+                                        val runRequest = request.copy(
+                                            seed = rng.nextLong(),
+                                            presetName = presetOption.key,
+                                            overrides = overrides,
+                                            applyHydraulic = applyHydraulicRun
+                                        )
+                                        withContext(Dispatchers.Main) {
+                                            generationState = GenerationState.BatchRunning(index, count)
+                                            logLines += "[${index + 1}/$count] Generating ${presetOption.label} (seed ${runRequest.seed})"
+                                            logLines += "[${index + 1}/$count] Overrides -> sea=${format2(overrides.seaLevel)}, mountain=${format2(overrides.mountainIntensity)}, rain=${format2(overrides.rainfall)}, evap=${format2(overrides.evaporation)}, thermal=${overrides.thermalIterations}, hydraulic=${overrides.hydraulicIterations}, clouds=${format2(overrides.cloudCoverage)}"
+                                            if (!applyHydraulicRun) {
+                                                logLines += "[${index + 1}/$count] Hydraulic erosion disabled for this run."
+                                            }
+                                        }
+                                        val summary = generatePlanet(runRequest) { message ->
+                                            withContext(Dispatchers.Main) {
+                                                logLines += "[${index + 1}/$count] $message"
+                                            }
+                                        }
+                                        summaries += summary
+                                        withContext(Dispatchers.Main) {
+                                            previewPath = summary.previewImage
+                                            previewImage = summary.previewImage?.let { loadPreviewBitmap(it) }
+                                            currentOutputDir = summary.outputDir
+                                            refreshGeneratedFiles(summary.outputDir, generatedFiles) { err ->
+                                                logLines += err
+                                            }
+                                            generationState = GenerationState.BatchRunning(index + 1, count)
+                                            logLines += "[${index + 1}/$count] Completed in ${summary.totalDuration.toMillis() / 1000.0}s"
+                                            logLines += "[${index + 1}/$count] Files -> ${summary.exportedMaps.joinToString()}"
+                                        }
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        generationState = GenerationState.BatchCompleted(summaries)
+                                        logLines += "Batch generation complete."
+                                    }
+                                } catch (cancel: CancellationException) {
+                                    withContext(Dispatchers.Main) {
+                                        logLines += "Batch generation cancelled."
+                                        generationState = GenerationState.Cancelled
+                                    }
+                                    throw cancel
+                                } catch (throwable: Throwable) {
+                                    withContext(Dispatchers.Main) {
+                                        logLines += "Batch generation failed: ${throwable.message ?: throwable::class.simpleName}"
+                                        generationState = GenerationState.Failed(throwable)
+                                    }
+                                } finally {
+                                    withContext(Dispatchers.Main) {
+                                        activeJob = null
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isBusy
+                    ) {
+                        Text("Batch Generate")
+                    }
+                }
+
                 when (val state = generationState) {
                     is GenerationState.Running -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                    is GenerationState.Completed -> Text(
-                        text = "Last run exported: ${state.summary.exportedMaps.joinToString()}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
+
+                    is GenerationState.BatchRunning -> {
+                        val progress = if (state.total <= 0) 0f else (state.completed.toFloat() / state.total)
+                        val clamped = progress.coerceIn(0f, 1f)
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            LinearProgressIndicator(
+                                progress = { clamped },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text(
+                                text = "Batch progress: ${state.completed}/${state.total}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+
+                    is GenerationState.Completed -> {
+                        val presetLabel = PRESET_OPTIONS.firstOrNull { it.key == state.summary.presetName }?.label
+                            ?: state.summary.presetName
+                        Text(
+                            text = "Last run ($presetLabel, seed ${state.summary.seed}) exported: ${state.summary.exportedMaps.joinToString()}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    is GenerationState.BatchCompleted -> {
+                        val last = state.summaries.lastOrNull()
+                        val suffix = if (last != null) {
+                            val presetLabel = PRESET_OPTIONS.firstOrNull { it.key == last.presetName }?.label
+                                ?: last.presetName
+                            " Last planet: $presetLabel (seed ${last.seed})."
+                        } else ""
+                        Text(
+                            text = "Batch generated ${state.summaries.size} planets.$suffix",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
 
                     is GenerationState.Failed -> Text(
                         text = "Warning: ${state.throwable.message ?: "Unknown error"}",
@@ -850,6 +1007,61 @@ private fun buildRequest(
     )
 }
 
+private fun randomOverrides(rng: Random): ParameterOverrides {
+    return ParameterOverrides(
+        seaLevel = rng.nextFloat(-0.2f..0.3f),
+        mountainIntensity = rng.nextFloat(0.5f..2.0f),
+        rainfall = rng.nextFloat(0f..1f),
+        evaporation = rng.nextFloat(0f..0.5f),
+        thermalIterations = rng.nextInt(0, 41),
+        hydraulicIterations = rng.nextInt(0, 81),
+        cloudCoverage = rng.nextFloat(0f..1f)
+    )
+}
+
+private fun Random.nextFloat(range: ClosedFloatingPointRange<Float>): Float {
+    return range.start + nextFloat() * (range.endInclusive - range.start)
+}
+
+private fun format2(value: Float): String = String.format(Locale.US, "%.2f", value)
+
+private fun buildOutputPath(map: ExportMap, request: GenerationRequest): Path {
+    val presetSlug = slugifyPreset(request.presetName)
+    val base = when (map) {
+        ExportMap.ALBEDO -> "planet_albedo"
+        ExportMap.HEIGHT -> "planet_height"
+        ExportMap.NORMAL -> "planet_normal"
+        ExportMap.ROUGHNESS -> "planet_roughness"
+        ExportMap.CLOUDS -> "planet_clouds"
+        ExportMap.EMISSIVE -> "planet_emissive"
+        ExportMap.AO -> "planet_ao"
+    }
+    val suffix = if (map == ExportMap.HEIGHT) "_16u" else ""
+    val fileName = "${base}_${presetSlug}_${request.seed}_${request.width}x${request.height}$suffix.png"
+    return request.outputDir.resolve(fileName)
+}
+
+private fun slugifyPreset(preset: String): String {
+    val slug = preset.lowercase(Locale.getDefault()).replace(NON_ALPHANUMERIC, "_").trim('_')
+    return if (slug.isEmpty()) "preset" else slug
+}
+
+private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
+
+private fun uniquePath(base: Path): Path {
+    if (!Files.exists(base)) return base
+    val name = base.fileName.toString()
+    val dot = name.lastIndexOf('.')
+    val stem = if (dot > 0) name.substring(0, dot) else name
+    val ext = if (dot > 0) name.substring(dot) else ""
+    var index = 1
+    while (true) {
+        val candidate = base.resolveSibling("${stem}_$index$ext")
+        if (!Files.exists(candidate)) return candidate
+        index++
+    }
+}
+
 suspend fun generatePlanet(
     request: GenerationRequest,
     onLog: suspend (String) -> Unit
@@ -897,30 +1109,37 @@ suspend fun generatePlanet(
     if (ExportMap.ALBEDO in request.exports) {
         onLog("Rendering albedo with hydrology overlays...")
         val argb = AlbedoRenderer.renderWithHydrology(heightField, preset)
-        val path = request.outputDir.resolve("planet_albedo_${request.width}x${request.height}.png")
+        val path = uniquePath(buildOutputPath(ExportMap.ALBEDO, request))
         ImageUtil.saveARGB(argb, path)
+        onLog("Saved albedo -> ${path.fileName}")
         previewImagePath = path
-        exportedMaps += "albedo"
+        exportedMaps += path.fileName.toString()
     }
 
     if (ExportMap.NORMAL in request.exports) {
         onLog("Rendering normal map...")
         val normals = NormalMapRenderer.render(heightField)
-        ImageUtil.saveARGB(normals, request.outputDir.resolve("planet_normal.png"))
-        exportedMaps += "normal"
+        val path = uniquePath(buildOutputPath(ExportMap.NORMAL, request))
+        ImageUtil.saveARGB(normals, path)
+        onLog("Saved normal -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
     }
 
     if (ExportMap.ROUGHNESS in request.exports) {
         onLog("Rendering roughness...")
         val roughness = RoughnessRenderer.render(heightField)
-        ImageUtil.saveGray8(roughness, request.outputDir.resolve("planet_roughness.png"))
-        exportedMaps += "roughness"
+        val path = uniquePath(buildOutputPath(ExportMap.ROUGHNESS, request))
+        ImageUtil.saveGray8(roughness, path)
+        onLog("Saved roughness -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
     }
 
     if (ExportMap.HEIGHT in request.exports) {
         onLog("Exporting height map...")
-        ImageUtil.saveGray16(heightField, request.outputDir.resolve("planet_height_16u.png"))
-        exportedMaps += "height"
+        val path = uniquePath(buildOutputPath(ExportMap.HEIGHT, request))
+        ImageUtil.saveGray16(heightField, path)
+        onLog("Saved height -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
     }
 
     if (ExportMap.CLOUDS in request.exports) {
@@ -935,15 +1154,19 @@ suspend fun generatePlanet(
         val cloudDuration = Duration.between(cloudStart, Instant.now())
         onLog("Cloud generation completed in ${cloudDuration.seconds}.${cloudDuration.toMillisPart()}s")
         val clouds = CloudRenderer.render(cloudField)
-        ImageUtil.saveARGB(clouds, request.outputDir.resolve("planet_clouds.png"))
-        exportedMaps += "clouds"
+        val path = uniquePath(buildOutputPath(ExportMap.CLOUDS, request))
+        ImageUtil.saveARGB(clouds, path)
+        onLog("Saved clouds -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
     }
 
     if (ExportMap.EMISSIVE in request.exports) {
         onLog("Rendering emissive map...")
         val emissive = EmissiveRenderer.render(heightField, preset, request.seed)
-        ImageUtil.saveARGB(emissive, request.outputDir.resolve("planet_emissive.png"))
-        exportedMaps += "emissive"
+        val path = uniquePath(buildOutputPath(ExportMap.EMISSIVE, request))
+        ImageUtil.saveARGB(emissive, path)
+        onLog("Saved emissive -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
     }
 
     if (ExportMap.AO in request.exports) {
@@ -953,8 +1176,10 @@ suspend fun generatePlanet(
         ao = AmbientOcclusionRenderer.smooth(ao, 1)
         val aoDuration = Duration.between(aoStart, Instant.now())
         onLog("Ambient occlusion finished in ${aoDuration.seconds}.${aoDuration.toMillisPart()}s")
-        ImageUtil.saveGray8(ao, request.outputDir.resolve("planet_ao.png"))
-        exportedMaps += "ao"
+        val path = uniquePath(buildOutputPath(ExportMap.AO, request))
+        ImageUtil.saveGray8(ao, path)
+        onLog("Saved AO -> ${path.fileName}")
+        exportedMaps += path.fileName.toString()
     }
 
     val totalDuration = Duration.between(terrainStart, Instant.now())
@@ -962,6 +1187,8 @@ suspend fun generatePlanet(
         totalDuration = totalDuration,
         exportedMaps = exportedMaps,
         outputDir = request.outputDir,
+        seed = request.seed,
+        presetName = request.presetName,
         previewImage = previewImagePath
     )
 }
@@ -1042,6 +1269,8 @@ private sealed interface GenerationState {
     data object Running : GenerationState
     data object Cancelled : GenerationState
     data class Completed(val summary: GenerationSummary) : GenerationState
+    data class BatchRunning(val completed: Int, val total: Int) : GenerationState
+    data class BatchCompleted(val summaries: List<GenerationSummary>) : GenerationState
     data class Failed(val throwable: Throwable) : GenerationState
 }
 
@@ -1052,7 +1281,7 @@ data class GenerationRequest(
     val presetName: String,
     val outputDir: Path,
     val exports: Set<ExportMap>,
-    val applyHydraulic: Boolean = true,
+    val applyHydraulic: Boolean = false,
     val overrides: ParameterOverrides = ParameterOverrides(
         seaLevel = 0.02f,
         mountainIntensity = 1.0f,
@@ -1068,6 +1297,8 @@ data class GenerationSummary(
     val totalDuration: Duration,
     val exportedMaps: List<String>,
     val outputDir: Path,
+    val seed: Long,
+    val presetName: String,
     val previewImage: Path? = null
 )
 
