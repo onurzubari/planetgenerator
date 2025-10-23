@@ -154,21 +154,21 @@ public final class SurfaceAnalyzer {
 
     private static float computeSnowCoverage(float temp, float heightValue, float seaLevel,
                                              float slope, float absSinLat) {
-        float altitude = clamp01((heightValue - seaLevel) * 1.6f);
-        float polar = clamp01((absSinLat - 0.55f) * 1.8f);
-        float cold = clamp01((0.25f - temp) * 2.5f);
-        float slopePenalty = 1f - clamp01(slope * 1.3f);
+        float altitude = clamp01((heightValue - seaLevel) * 1.4f);
+        float polar = clamp01((absSinLat - 0.65f) * 1.2f);
+        float cold = clamp01((0.18f - temp) * 2.0f);
+        float slopePenalty = 1f - clamp01(slope * 1.1f);
         float combined = Math.max(Math.max(altitude, polar), cold);
         return clamp01(combined * slopePenalty);
     }
 
     private static float computeAtmosphereMask(float heightValue, float seaLevel,
                                                float temp, float humidity, float absSinLat) {
-        float altitude = clamp01((heightValue - seaLevel) * 1.1f);
-        float polarGlow = clamp01((absSinLat - 0.4f) * 1.5f);
+        float altitude = clamp01((heightValue - seaLevel) * 0.9f);
+        float polarGlow = clamp01((absSinLat - 0.55f) * 0.9f);
         float dryness = clamp01(1f - humidity);
-        float cold = clamp01((0.45f - temp) * 1.4f);
-        float base = Math.max(altitude * 0.5f + dryness * 0.2f, polarGlow * 0.6f + cold * 0.3f);
+        float cold = clamp01((0.35f - temp) * 1.1f);
+        float base = Math.max(altitude * 0.45f + dryness * 0.15f, polarGlow * 0.35f + cold * 0.25f);
         return clamp01(base);
     }
 
@@ -457,9 +457,9 @@ public final class SurfaceAnalyzer {
         baseColor[2] = clamp01(baseColor[2] + detailOffset * 0.6f);
 
         // Gently desaturate polar regions
-        float polar = clamp01((float) Math.abs(Math.sin(lat)) * 1.1f - 0.3f);
+        float polar = clamp01((float) Math.abs(Math.sin(lat)) * 0.9f - 0.45f);
         if (!isWater && polar > 0f) {
-            float desat = polar * 0.2f;
+            float desat = polar * 0.1f;
             float avg = (baseColor[0] + baseColor[1] + baseColor[2]) / 3f;
             baseColor[0] = mix(baseColor[0], avg, desat);
             baseColor[1] = mix(baseColor[1], avg, desat);
@@ -478,7 +478,7 @@ public final class SurfaceAnalyzer {
 
         return new BiomeShading(baseColor, roughness, metallic, oceanSpec,
                 biomeColor, materialColor, finalOceanColour,
-                new float[]{0.3f + polar * 0.2f, 0.45f + polar * 0.25f, 0.7f + polar * 0.2f});
+                new float[]{0.3f + polar * 0.08f, 0.42f + polar * 0.12f, 0.65f + polar * 0.1f});
     }
 
     private static float mix(float a, float b, float t) {
