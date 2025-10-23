@@ -1,7 +1,24 @@
 package com.onur.planetgen.gui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.VerticalScrollbar
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -10,12 +27,49 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.loadImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -40,7 +94,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.*
 import kotlin.io.path.absolutePathString
-import kotlin.math.roundToInt
+import kotlin.math.*
 
 fun main() = application {
     Window(onCloseRequest = ::exitApplication, title = "Planet Generator Studio") {
@@ -87,7 +141,6 @@ private fun PlanetGeneratorApp() {
     var generationState by remember { mutableStateOf<GenerationState>(GenerationState.Idle) }
     var activeJob by remember { mutableStateOf<Job?>(null) }
     val logListState = rememberLazyListState()
-    val fileListState = rememberLazyListState()
     var previewTab by remember { mutableStateOf(PreviewTab.STILL) }
     var settingsTab by remember { mutableStateOf(SettingsTab.GENERAL) }
 
@@ -456,6 +509,21 @@ private fun PlanetGeneratorApp() {
         ElevatedCard(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 320.dp)
+                .weight(1f)
+        ) {
+            PreviewPanel(
+                modifier = Modifier.fillMaxSize(),
+                previewTab = previewTab,
+                onTabChange = { previewTab = it },
+                previewImage = previewImage,
+                previewPath = previewPath
+            )
+        }
+
+        ElevatedCard(
+            modifier = Modifier
+                .fillMaxWidth()
                 .weight(1f)
         ) {
             Row(modifier = Modifier.fillMaxSize()) {
@@ -480,6 +548,208 @@ private fun PlanetGeneratorApp() {
         }
     }
 }
+
+@Composable
+private fun PreviewPanel(
+    modifier: Modifier = Modifier,
+    previewTab: PreviewTab,
+    onTabChange: (PreviewTab) -> Unit,
+    previewImage: ImageBitmap?,
+    previewPath: Path?
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "Preview",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Spacer(Modifier.weight(1f))
+            if (previewPath != null && Files.exists(previewPath)) {
+                TextButton(
+                    onClick = { openFile(previewPath) },
+                    enabled = Desktop.isDesktopSupported()
+                ) {
+                    Text("Open Image")
+                }
+                TextButton(
+                    onClick = {
+                        val folder = previewPath.parent ?: previewPath
+                        openFolder(folder)
+                    },
+                    enabled = Desktop.isDesktopSupported()
+                ) {
+                    Text("Reveal Folder")
+                }
+            }
+        }
+        TabRow(selectedTabIndex = previewTab.ordinal) {
+            PreviewTab.entries.forEachIndexed { index, tab ->
+                Tab(
+                    selected = previewTab.ordinal == index,
+                    onClick = { onTabChange(PreviewTab.entries[index]) },
+                    text = { Text(tab.label) }
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            when {
+                previewImage == null -> Text(
+                    text = "Run a generation to see the latest planet here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                previewTab == PreviewTab.STILL -> StillPreview(
+                    image = previewImage,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                previewTab == PreviewTab.ROTATING -> RotatingPreview(
+                    image = previewImage,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        if (previewPath != null) {
+            Text(
+                text = previewPath.fileName.toString(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun StillPreview(
+    image: ImageBitmap,
+    modifier: Modifier = Modifier
+) {
+    Image(
+        bitmap = image,
+        contentDescription = "Planet preview still",
+        modifier = modifier,
+        contentScale = ContentScale.Fit
+    )
+}
+
+@Composable
+private fun RotatingPreview(
+    image: ImageBitmap,
+    modifier: Modifier = Modifier
+) {
+    val pixelMap = remember(image) { image.toPixelMap() }
+    var rotation by remember { mutableStateOf(0f) }
+    val outlineColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+
+    LaunchedEffect(image) {
+        rotation = 0f
+        var lastFrame = 0L
+        while (true) {
+            withFrameNanos { timestamp ->
+                if (lastFrame != 0L) {
+                    val deltaSeconds = (timestamp - lastFrame) / 1_000_000_000f
+                    rotation = (rotation + deltaSeconds * ROTATION_SPEED_RADIANS).mod(TAU)
+                }
+                lastFrame = timestamp
+            }
+        }
+    }
+
+    Canvas(modifier = modifier) {
+        val radius = size.minDimension / 2f * 0.85f
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val lonSteps = 140
+        val latSteps = 80
+        val tileWidth = max(1f, (2f * radius) / lonSteps)
+        val tileHeight = max(1f, (2f * radius) / latSteps)
+        val width = pixelMap.width
+        val height = pixelMap.height
+        val rotationRad = rotation.toDouble()
+        val circleRect = Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius)
+        val circlePath = androidx.compose.ui.graphics.Path().apply { addOval(circleRect) }
+
+        val light = floatArrayOf(0.35f, 0.2f, 1f)
+        val lightLen = sqrt(light[0] * light[0] + light[1] * light[1] + light[2] * light[2])
+        val lx = light[0] / lightLen
+        val ly = light[1] / lightLen
+        val lz = light[2] / lightLen
+
+        clipPath(circlePath) {
+            for (lonIndex in 0..lonSteps) {
+                val deltaLon = ((lonIndex.toDouble() / lonSteps) - 0.5) * PI
+                val sinDelta = sin(deltaLon)
+                val cosDelta = cos(deltaLon)
+                val textureLon = ((rotationRad + deltaLon) % TAU_DOUBLE + TAU_DOUBLE) % TAU_DOUBLE
+                val u = (textureLon / TAU_DOUBLE).toFloat()
+
+                for (latIndex in 0..latSteps) {
+                    val lat = ((latIndex.toDouble() / latSteps) - 0.5) * PI
+                    val sinLat = sin(lat)
+                    val cosLat = cos(lat)
+
+                    val x = (cosLat * sinDelta).toFloat()
+                    val y = sinLat.toFloat()
+                    val z = (cosLat * cosDelta).toFloat()
+                    if (z <= 0f) continue
+
+                    val screenX = center.x + x * radius
+                    val screenY = center.y - y * radius
+
+                    val px = (u * (width - 1)).toInt().coerceIn(0, width - 1)
+                    val v = (0.5 - lat / PI).toFloat()
+                    val py = (v * (height - 1)).toInt().coerceIn(0, height - 1)
+
+                    val base = pixelMap[px, py]
+                    val dot = max(0f, x * lx + y * ly + z * lz)
+                    val shade = 0.25f + 0.75f * dot
+                    val shaded = Color(
+                        red = base.red * shade,
+                        green = base.green * shade,
+                        blue = base.blue * shade,
+                        alpha = base.alpha
+                    )
+
+                    drawRect(
+                        color = shaded,
+                        topLeft = Offset(
+                            x = screenX - tileWidth / 2f,
+                            y = screenY - tileHeight / 2f
+                        ),
+                        size = Size(tileWidth, tileHeight)
+                    )
+                }
+            }
+        }
+
+        drawCircle(
+            color = outlineColor,
+            radius = radius * 1.02f,
+            center = center,
+            style = Stroke(width = 1.5f)
+        )
+    }
+}
+
+private const val ROTATION_SPEED_RADIANS = 0.6f
+private val TAU = (2 * PI).toFloat()
+private val TAU_DOUBLE = 2 * PI
 
 @Composable
 private fun ParameterSlider(
@@ -696,6 +966,14 @@ suspend fun generatePlanet(
     )
 }
 
+private fun openFile(path: Path) {
+    runCatching {
+        if (Desktop.isDesktopSupported() && Files.exists(path)) {
+            Desktop.getDesktop().open(path.toFile())
+        }
+    }
+}
+
 private fun openFolder(path: Path) {
     runCatching {
         if (Desktop.isDesktopSupported()) {
@@ -793,6 +1071,7 @@ data class GenerationSummary(
     val previewImage: Path? = null
 )
 
-enum class PreviewTab {
-    STILL, ROTATING
+enum class PreviewTab(val label: String) {
+    STILL("Still Image"),
+    ROTATING("3D Orbit")
 }
