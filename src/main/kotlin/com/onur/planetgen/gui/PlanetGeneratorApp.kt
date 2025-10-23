@@ -547,20 +547,17 @@ private fun PlanetGeneratorApp() {
                                         ensureActive()
                                         val presetOption = PRESET_OPTIONS.random(rng)
                                         val overrides = randomOverrides(rng)
-                                        val applyHydraulicRun = rng.nextBoolean()
                                         val runRequest = request.copy(
                                             seed = rng.nextLong(),
                                             presetName = presetOption.key,
                                             overrides = overrides,
-                                            applyHydraulic = applyHydraulicRun
+                                            applyHydraulic = false
                                         )
                                         withContext(Dispatchers.Main) {
                                             generationState = GenerationState.BatchRunning(index, count)
                                             logLines += "[${index + 1}/$count] Generating ${presetOption.label} (seed ${runRequest.seed})"
                                             logLines += "[${index + 1}/$count] Overrides -> sea=${format2(overrides.seaLevel)}, mountain=${format2(overrides.mountainIntensity)}, rain=${format2(overrides.rainfall)}, evap=${format2(overrides.evaporation)}, thermal=${overrides.thermalIterations}, hydraulic=${overrides.hydraulicIterations}, clouds=${format2(overrides.cloudCoverage)}"
-                                            if (!applyHydraulicRun) {
-                                                logLines += "[${index + 1}/$count] Hydraulic erosion disabled for this run."
-                                            }
+                                            logLines += "[${index + 1}/$count] Hydraulic erosion disabled for this run."
                                         }
                                         val summary = generatePlanet(runRequest) { message ->
                                             withContext(Dispatchers.Main) {
