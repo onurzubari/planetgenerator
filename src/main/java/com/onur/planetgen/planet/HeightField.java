@@ -4,31 +4,45 @@ import com.onur.planetgen.noise.OpenSimplex2;
 import com.onur.planetgen.noise.DomainWarpNoise;
 import com.onur.planetgen.erosion.ThermalErosion;
 import com.onur.planetgen.erosion.HydraulicErosion;
+import com.onur.planetgen.config.Preset;
 
 public final class HeightField {
     private HeightField() {}
 
     /**
      * Generate procedural height field with terrain synthesis and erosion.
-     * Implements full Phase 2 pipeline: terrain → thermal erosion → hydraulic erosion.
+     * Uses default earthlike preset for backward compatibility.
      */
-    public static float[][] generate(long seed, SphericalSampler sp /* + params */) {
+    public static float[][] generate(long seed, SphericalSampler sp) {
+        return generate(seed, sp, new Preset("earthlike"));
+    }
+
+    /**
+     * Generate procedural height field with terrain synthesis and erosion.
+     * Implements full Phase 3 pipeline: terrain → thermal erosion → hydraulic erosion.
+     *
+     * @param seed random seed for noise
+     * @param sp spherical sampler for equirectangular mapping
+     * @param preset configuration with all parameters
+     * @return normalized height field [-1, 1]
+     */
+    public static float[][] generate(long seed, SphericalSampler sp, Preset preset) {
         int W = sp.W, H = sp.H;
         float[][] h = new float[H][W];
 
-        // Parameters for Phase 2 (earthlike preset with erosion)
-        double seaLevel = 0.02;
-        double continentScale = 2.2;
-        double mountainIntensity = 0.9;
+        // Use preset parameters
+        double seaLevel = preset.seaLevel;
+        double continentScale = preset.continentScale;
+        double mountainIntensity = preset.mountainIntensity;
 
-        // Erosion parameters (reduced for Phase 2 testing; will be parameterized in Phase 3)
-        int thermalIterations = 8;      // Reduced from 20 for faster testing
-        double thermalTalus = 0.55;
-        double thermalK = 0.15;
+        // Erosion parameters from preset
+        int thermalIterations = preset.thermalIterations;
+        double thermalTalus = preset.thermalTalus;
+        double thermalK = preset.thermalK;
 
-        int hydraulicIterations = 4;    // Reduced from 60 for faster testing
-        double rainfall = 0.6;
-        double evaporation = 0.1;
+        int hydraulicIterations = preset.hydraulicIterations;
+        double rainfall = preset.rainfall;
+        double evaporation = preset.evaporation;
 
         // Noise generators
         OpenSimplex2 base = new OpenSimplex2(seed);

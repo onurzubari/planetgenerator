@@ -10,8 +10,10 @@ import com.onur.planetgen.render.AlbedoRenderer;
 import com.onur.planetgen.render.NormalMapRenderer;
 import com.onur.planetgen.render.RoughnessRenderer;
 import com.onur.planetgen.render.CloudRenderer;
+import com.onur.planetgen.render.EmissiveRenderer;
 import com.onur.planetgen.atmosphere.CloudField;
 import com.onur.planetgen.util.ImageUtil;
+import com.onur.planetgen.config.Preset;
 
 @CommandLine.Command(name = "planetgen", mixinStandardHelpOptions = true,
         description = "Procedural planet texture generator (2:1 equirectangular)")
@@ -23,10 +25,12 @@ public class Main implements Runnable {
     @CommandLine.Option(names = "--resolution", description = "WxH (2:1)", defaultValue = "4096x2048")
     String resolution;
 
-    @CommandLine.Option(names = "--preset", description = "Style preset", defaultValue = "earthlike")
-    String preset;
+    @CommandLine.Option(names = "--preset", description = "Style preset: earthlike, desert, ice, lava, alien",
+            defaultValue = "earthlike")
+    String presetName;
 
-    @CommandLine.Option(names = "--export", split = ",", description = "Maps to export: albedo,height,normal,roughness,clouds",
+    @CommandLine.Option(names = "--export", split = ",",
+            description = "Maps to export: albedo,height,normal,roughness,clouds,emissive",
             defaultValue = "albedo,height,normal,roughness,clouds")
     List<String> export;
 
@@ -41,40 +45,65 @@ public class Main implements Runnable {
     @Override
     public void run() {
         try {
+            // Parse resolution
             String[] wh = resolution.toLowerCase(Locale.ROOT).split("x");
             int W = Integer.parseInt(wh[0]);
             int H = Integer.parseInt(wh[1]);
             if (W != 2 * H) throw new IllegalArgumentException("Resolution must be 2:1 (e.g., 4096x2048)");
             Files.createDirectories(outDir);
 
-            // TODO: load preset yaml/json (for now just stub constants in code)
+            // Load preset (Phase 3 feature)
+            System.out.println("Loading preset: " + presetName);
+            Preset preset = new Preset(presetName);
+            System.out.println(preset);
 
+            // Generate terrain and apply erosion
             var sampler = new SphericalSampler(W, H);
-            var height = HeightField.generate(seed, sampler /* + params */);
+            System.out.println("Generating height field with " + presetName + " preset...");
+            var height = HeightField.generate(seed, sampler, preset);
 
+            // Export requested maps
             if (export.contains("albedo")) {
-                var argb = AlbedoRenderer.render(height /* + biome/climate */);
+                System.out.println("Rendering albedo...");
+                var argb = AlbedoRenderer.render(height);
                 ImageUtil.saveARGB(argb, outDir.resolve("planet_albedo_" + W + "x" + H + ".png"));
             }
+
             if (export.contains("normal")) {
+                System.out.println("Rendering normals...");
                 var argbN = NormalMapRenderer.render(height);
                 ImageUtil.saveARGB(argbN, outDir.resolve("planet_normal.png"));
             }
+
             if (export.contains("roughness")) {
-                var gray = RoughnessRenderer.render(height /* + humidity/slope */);
+                System.out.println("Rendering roughness...");
+                var gray = RoughnessRenderer.render(height);
                 ImageUtil.saveGray8(gray, outDir.resolve("planet_roughness.png"));
             }
+
             if (export.contains("height")) {
+                System.out.println("Exporting height map...");
                 ImageUtil.saveGray16(height, outDir.resolve("planet_height_16u.png"));
             }
+
             if (export.contains("clouds")) {
-                CloudField clouds = CloudField.generate(seed + 1, sampler /* + params */);
+                System.out.println("Generating clouds...");
+                CloudField clouds = CloudField.generate(seed + 1, sampler);
                 var argbC = CloudRenderer.render(clouds);
                 ImageUtil.saveARGB(argbC, outDir.resolve("planet_clouds.png"));
             }
+
+            if (export.contains("emissive")) {
+                System.out.println("Rendering emissive map...");
+                var argbE = EmissiveRenderer.render(height, preset, seed);
+                ImageUtil.saveARGB(argbE, outDir.resolve("planet_emissive.png"));
+            }
+
             System.out.println("Done → " + outDir.toAbsolutePath());
         } catch (Exception e) {
+            System.err.println("Error during generation:");
             e.printStackTrace();
+            System.exit(1);
         }
     }
 }
