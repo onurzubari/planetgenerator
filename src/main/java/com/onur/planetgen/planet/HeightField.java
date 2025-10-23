@@ -2,18 +2,33 @@ package com.onur.planetgen.planet;
 
 import com.onur.planetgen.noise.OpenSimplex2;
 import com.onur.planetgen.noise.DomainWarpNoise;
+import com.onur.planetgen.erosion.ThermalErosion;
+import com.onur.planetgen.erosion.HydraulicErosion;
 
 public final class HeightField {
     private HeightField() {}
 
+    /**
+     * Generate procedural height field with terrain synthesis and erosion.
+     * Implements full Phase 2 pipeline: terrain → thermal erosion → hydraulic erosion.
+     */
     public static float[][] generate(long seed, SphericalSampler sp /* + params */) {
         int W = sp.W, H = sp.H;
         float[][] h = new float[H][W];
 
-        // Parameters for Phase 1 (earthlike preset)
+        // Parameters for Phase 2 (earthlike preset with erosion)
         double seaLevel = 0.02;
         double continentScale = 2.2;
         double mountainIntensity = 0.9;
+
+        // Erosion parameters (reduced for Phase 2 testing; will be parameterized in Phase 3)
+        int thermalIterations = 8;      // Reduced from 20 for faster testing
+        double thermalTalus = 0.55;
+        double thermalK = 0.15;
+
+        int hydraulicIterations = 4;    // Reduced from 60 for faster testing
+        double rainfall = 0.6;
+        double evaporation = 0.1;
 
         // Noise generators
         OpenSimplex2 base = new OpenSimplex2(seed);
@@ -65,6 +80,24 @@ public final class HeightField {
 
         // Apply sea level offset
         applySeaLevel(h, seaLevel);
+
+        // Phase 2: Apply erosion for realism
+        System.out.println("Applying thermal erosion (" + thermalIterations + " iterations)...");
+        ThermalErosion.apply(h, thermalIterations, thermalTalus, thermalK);
+
+        System.out.println("Applying hydraulic erosion (" + hydraulicIterations + " iterations)...");
+        HydraulicErosion.apply(h, hydraulicIterations, rainfall, evaporation);
+
+        // Normalize again after erosion to ensure [-1, 1] range
+        minH = Float.POSITIVE_INFINITY;
+        maxH = Float.NEGATIVE_INFINITY;
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                if (h[y][x] < minH) minH = h[y][x];
+                if (h[y][x] > maxH) maxH = h[y][x];
+            }
+        }
+        normalizeHeight(h, minH, maxH);
 
         return h;
     }
