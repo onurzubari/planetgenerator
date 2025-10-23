@@ -65,8 +65,8 @@ public final class HeightField {
                 double ny = sLat;
                 double nz = cLat * Math.sin(lon);
 
-                // 1. Continental base: domain-warped fBm (low frequency, 2 octaves)
-                double continent = fbmLowFreq(domainWarped, nx, ny, nz, continentScale, 2, 2.0, 0.5);
+                // 1. Continental base: domain-warped fBm (low frequency, 5 octaves for more detail)
+                double continent = fbmLowFreq(domainWarped, nx, ny, nz, continentScale, 5, 2.0, 0.5);
 
                 // 2. Mountains: ridged multifractal modulated by continental mask
                 double ridged = ridgedFbm(base, nx, ny, nz, continentScale * 1.5, 4, 2.0, 0.6);
@@ -77,7 +77,7 @@ public final class HeightField {
                 double detail = fbmMidFreq(base, nx, ny, nz, continentScale * 3.0, 3, 2.0, 0.5);
                 double slope = estimateSlope(base, nx, ny, nz, continentScale, 0.01);
                 double slopeMask = Math.pow(Math.max(0.0, slope), 2.0); // Quadratic falloff
-                double detailModulated = detail * 0.15 * slopeMask;
+                double detailModulated = detail * 0.30 * slopeMask;
 
                 // Combine: continent + mountains + detail
                 double heightValue = 0.6 * continent + 0.3 * mountains + 0.1 * detailModulated;
