@@ -1,5 +1,7 @@
 package com.onur.planetgen.erosion;
 
+import java.util.PriorityQueue;
+
 /**
  * Represents water flow field on a height map.
  * Computes downslope flow direction and accumulation.
@@ -80,36 +82,37 @@ public final class FlowField {
             }
         }
 
-        // Compute accumulation by propagating downslope
-        // Process from highest to lowest elevation (reverse topological order)
+        // Compute accumulation by propagating downslope (OPTIMIZED - O(n log n) instead of O(n²))
+        // Use priority queue to process cells from highest to lowest elevation
         boolean[] visited = new boolean[H * W];
-        for (int iter = 0; iter < H * W; iter++) {
-            // Find unvisited cell with highest elevation
-            int maxY = -1, maxX = -1;
-            float maxHeight = Float.NEGATIVE_INFINITY;
 
-            for (int y = 0; y < H; y++) {
-                for (int x = 0; x < W; x++) {
-                    if (!visited[y * W + x] && h[y][x] > maxHeight) {
-                        maxHeight = h[y][x];
-                        maxY = y;
-                        maxX = x;
-                    }
-                }
+        // Create max heap based on elevation
+        PriorityQueue<Cell> pq = new PriorityQueue<>((a, b) -> Float.compare(b.height, a.height));
+
+        // Add all cells to priority queue
+        for (int y = 0; y < H; y++) {
+            for (int x = 0; x < W; x++) {
+                pq.offer(new Cell(y, x, h[y][x]));
             }
+        }
 
-            if (maxY == -1) break; // No more unvisited cells
+        // Process cells from highest to lowest
+        while (!pq.isEmpty()) {
+            Cell cell = pq.poll();
+            int cy = cell.y;
+            int cx = cell.x;
 
-            visited[maxY * W + maxX] = true;
+            if (visited[cy * W + cx]) continue;
+            visited[cy * W + cx] = true;
 
             // Propagate accumulation downslope
-            if (flowX[maxY][maxX] != 0 || flowY[maxY][maxX] != 0) {
-                float fx = flowX[maxY][maxX];
-                float fy = flowY[maxY][maxX];
+            if (flowX[cy][cx] != 0 || flowY[cy][cx] != 0) {
+                float fx = flowX[cy][cx];
+                float fy = flowY[cy][cx];
 
                 // Find which neighbor is the flow target
                 float bestDist = Float.MAX_VALUE;
-                int targetY = maxY, targetX = maxX;
+                int targetY = cy, targetX = cx;
 
                 for (int dy = -1; dy <= 1; dy++) {
                     for (int dx = -1; dx <= 1; dx++) {
@@ -118,8 +121,8 @@ public final class FlowField {
                         float dist = Math.abs(dx - fx) + Math.abs(dy - fy);
                         if (dist < bestDist) {
                             bestDist = dist;
-                            targetY = maxY + dy;
-                            targetX = maxX + dx;
+                            targetY = cy + dy;
+                            targetX = cx + dx;
                         }
                     }
                 }
@@ -127,11 +130,26 @@ public final class FlowField {
                 // Clamp y, wrap x
                 if (targetY >= 0 && targetY < H) {
                     targetX = (targetX + W) % W;
-                    accum[targetY][targetX] += accum[maxY][maxX];
+                    accum[targetY][targetX] += accum[cy][cx];
                 }
             }
         }
 
         return new FlowField(flowX, flowY, accum);
+    }
+
+    /**
+     * Helper class for priority queue sorting by elevation.
+     */
+    private static final class Cell {
+        final int y;
+        final int x;
+        final float height;
+
+        Cell(int y, int x, float height) {
+            this.y = y;
+            this.x = x;
+            this.height = height;
+        }
     }
 }
